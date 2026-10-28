@@ -3,7 +3,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { Window } from "@wailsio/runtime";
 import * as SSH from "../bindings/shuttle/sshservice";
-import type { HostConfig, SessionInfo } from "../bindings/shuttle/internal/sshcore/models";
+import type { HostConfig } from "../bindings/shuttle/internal/sshcore/models";
 import HostDialog from "./components/HostDialog.vue";
 import SftpView from "./components/SftpView.vue";
 import TerminalPane from "./components/TerminalPane.vue";
@@ -92,12 +92,17 @@ const filteredHosts = computed(() => {
   );
 });
 
-/** 同一主机已有会话时用于展示状态 */
-function sessionOf(h: HostConfig): SessionInfo | undefined {
-  return sessions.value.find(
-    (s) => s.host === h.host && s.port === h.port && s.user === h.user,
-  );
-}
+/** 按分组聚合，保持原有顺序；分组名为空时归入「默认分组」 */
+const groupedHosts = computed(() => {
+  const groups = new Map<string, HostConfig[]>();
+  for (const h of filteredHosts.value) {
+    const key = h.group?.trim() || "默认分组";
+    const list = groups.get(key);
+    if (list) list.push(h);
+    else groups.set(key, [h]);
+  }
+  return [...groups].map(([name, list]) => ({ name, hosts: list }));
+});
 
 async function refreshMax() {
   try {
@@ -238,7 +243,7 @@ function closeSession(id: string) {
             <input
               ref="searchInput"
               v-model="query"
-              placeholder="搜索已保存的服务器"
+              placeholder="搜索服务器"
               @keydown.esc="searchOpen = false"
             />
           </div>
@@ -289,14 +294,10 @@ function closeSession(id: string) {
       </div>
     </header>
 
-    <!-- 第二行：搜索（仅主页） -->
-    <div v-if="page === 'home'" class="searchbar">
-      <svg class="s-ico" viewBox="0 0 16 16">
-        <circle cx="7" cy="7" r="4.4" />
-        <path d="M10.4 10.4L14 14" />
-      </svg>
-      <input v-model="query" placeholder="搜索已保存的服务器：IP、备注名或分组" />
-      <span class="count">{{ filteredHosts.length }} / {{ hosts.length }}</span>
+    <!-- 第二行：搜索 + 新增（仅主页） -->
+    <div v-if="page === 'home'" class="home-bar">
+      <input v-model="query" placeholder="搜索服务器：IP、备注名或分组" />
+      <button class="btn primary new-btn" @click="openNew">新增服务器</button>
     </div>
 
     <!-- 第三行：服务器列表 / 终端 / SFTP -->
@@ -304,81 +305,73 @@ function closeSession(id: string) {
       <section v-show="page === 'home'" class="list-view">
         <div class="list-head">
           <div class="lh-text">
-            <h2>已保存的服务器</h2>
+            <h2>服务器</h2>
           </div>
           <div class="lh-tools">
             <button v-if="sessions.length" class="btn ghost" @click="page = 'term'">
               返回终端 · {{ sessions.length }}
             </button>
-            <button class="btn primary" @click="openNew">新建服务器</button>
           </div>
         </div>
 
         <div class="cards">
-          <article
-            v-for="h in filteredHosts"
-            :key="h.id"
-            class="card"
-            @dblclick="connectHost(h)"
-          >
-            <div class="card-top">
-              <span class="avatar" :style="{ background: avatarColor(h.name || h.host) }">
-                {{ initialOf(h.name || h.host) }}
-              </span>
-              <div class="who">
-                <strong>{{ h.name || h.host }}</strong>
-                <small>{{ h.user }}@{{ h.host }}:{{ h.port }}</small>
-              </div>
-              <span
-                v-if="sessionOf(h)"
-                class="state"
-                :class="sessionOf(h)!.status"
+          <section v-for="g in groupedHosts" :key="g.name" class="group">
+            <header class="group-head">
+              <span class="group-name">{{ g.name }}</span>
+              <span class="group-count">{{ g.hosts.length }} 台服务器</span>
+            </header>
+
+            <div class="group-cards">
+              <article
+                v-for="h in g.hosts"
+                :key="h.id"
+                class="card"
+                @dblclick="connectHost(h)"
               >
-                {{
-                  sessionOf(h)!.status === "connected"
-                    ? "已连接"
-                    : sessionOf(h)!.status === "connecting"
-                      ? "连接中"
-                      : sessionOf(h)!.status === "error"
-                        ? "失败"
-                        : "已断开"
-                }}
-              </span>
+                <div class="card-top">
+                  <span class="avatar" :style="{ background: avatarColor(h.name || h.host) }">
+                    {{ initialOf(h.name || h.host) }}
+                  </span>
+                  <div class="who">
+                    <strong>{{ h.name || h.host }}</strong>
+                    <small>{{ h.user }}@{{ h.host }}:{{ h.port }}</small>
+                  </div>
 
-              <div class="more" :class="{ open: menuFor === h.id }">
-                <button
-                  class="more-btn"
-                  title="更多操作"
-                  @click.stop="toggleMenu(h.id)"
-                >
-                  <svg viewBox="0 0 16 16">
-                    <circle cx="3.4" cy="8" r="1.3" />
-                    <circle cx="8" cy="8" r="1.3" />
-                    <circle cx="12.6" cy="8" r="1.3" />
-                  </svg>
-                </button>
-                <div v-if="menuFor === h.id" class="menu" @click.stop>
-                  <button @click="act(() => connectHost(h))">连接</button>
-                  <button @click="act(() => openEdit(h))">编辑</button>
-                  <button @click="act(() => duplicateHost(h))">复制</button>
-                  <span class="sep" />
-                  <button class="danger" @click="act(() => void removeHost(h))">删除</button>
+                  <div class="more" :class="{ open: menuFor === h.id }">
+                    <button
+                      class="more-btn"
+                      title="更多操作"
+                      @click.stop="toggleMenu(h.id)"
+                    >
+                      <svg viewBox="0 0 16 16">
+                        <circle cx="3.4" cy="8" r="1.3" />
+                        <circle cx="8" cy="8" r="1.3" />
+                        <circle cx="12.6" cy="8" r="1.3" />
+                      </svg>
+                    </button>
+                    <div v-if="menuFor === h.id" class="menu" @click.stop>
+                      <button @click="act(() => connectHost(h))">连接</button>
+                      <button @click="act(() => openEdit(h))">编辑</button>
+                      <button @click="act(() => duplicateHost(h))">复制</button>
+                      <span class="sep" />
+                      <button class="danger" @click="act(() => void removeHost(h))">删除</button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <div class="tags">
-              <span class="tag">{{ h.group || "默认分组" }}</span>
-              <span class="tag">{{ authLabel(h) }}</span>
-              <span class="tag">{{ h.encoding }}</span>
+                <div class="tags">
+                  <span class="tag">{{ authLabel(h) }}</span>
+                  <span class="tag">{{ h.encoding }}</span>
+                </div>
+              </article>
             </div>
-          </article>
+          </section>
         </div>
 
         <div v-if="!hosts.length" class="empty-state">
           <h3>还没有保存的服务器</h3>
-          <p>点击右上角「新建服务器」添加第一条 SSH 连接信息。</p>
-          <button class="btn primary" @click="openNew">新建服务器</button>
+          <p>点击上方「新增服务器」添加第一条 SSH 连接信息。</p>
+          <button class="btn primary" @click="openNew">新增服务器</button>
         </div>
         <div v-else-if="!filteredHosts.length" class="empty-state">
           <h3>没有匹配的服务器</h3>
@@ -673,26 +666,18 @@ function closeSession(id: string) {
 }
 
 /* ------------------------------------------------------------- 第二行 */
-.searchbar {
+.home-bar {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   flex: none;
   padding: 10px 18px;
   border-bottom: 1px solid var(--win-stroke);
   background: var(--win-bg);
 }
-.s-ico {
-  flex: none;
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: var(--win-text-3);
-  stroke-width: 1.3;
-  stroke-linecap: round;
-}
-.searchbar input {
-  flex: 1;
+.home-bar input {
+  align-self: stretch;
   min-width: 0;
   height: 34px;
   padding: 0 13px;
@@ -704,25 +689,19 @@ function closeSession(id: string) {
   outline: none;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.searchbar input::placeholder {
+.home-bar input::placeholder {
   color: var(--win-text-3);
 }
-.searchbar input:hover {
+.home-bar input:hover {
   background: var(--win-fill-hover);
 }
-.searchbar input:focus {
+.home-bar input:focus {
   border-color: var(--win-accent);
   box-shadow: 0 0 0 3px var(--win-accent-soft);
 }
-.searchbar .count {
-  flex: none;
-  padding: 3px 9px;
-  border-radius: var(--win-radius);
-  background: var(--win-fill);
-  border: 1px solid var(--win-stroke);
-  color: var(--win-text-3);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+.new-btn {
+  height: 32px;
+  padding: 0 14px;
 }
 
 /* ------------------------------------------------------------- 第三行 */
@@ -760,6 +739,27 @@ function closeSession(id: string) {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+.group + .group {
+  margin-top: 18px;
+}
+.group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.group-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--win-text-2);
+}
+.group-count {
+  color: var(--win-text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.group-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   align-content: start;
@@ -820,26 +820,6 @@ function closeSession(id: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.state {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--win-fill);
-  color: var(--win-text-3);
-  font-size: 10.5px;
-}
-.state.connected {
-  background: rgba(61, 220, 132, 0.16);
-  color: var(--win-ok);
-}
-.state.connecting {
-  background: rgba(255, 180, 84, 0.16);
-  color: var(--win-warn);
-}
-.state.error {
-  background: rgba(255, 153, 164, 0.16);
-  color: var(--win-err);
 }
 .tags {
   display: flex;
