@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Shuttle 主界面：顶部 SFTP / 主页 / 搜索，主体在主页、终端、SFTP 之间切换。
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Window } from "@wailsio/runtime";
 import * as SSH from "../bindings/shuttle/sshservice";
 import type { HostConfig } from "../bindings/shuttle/internal/sshcore/models";
@@ -29,6 +29,42 @@ const page = ref<"home" | "sftp" | "term">("home");
 /** 顶栏搜索面板 */
 const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement>();
+/** 顶栏已打开终端列表浮层 */
+const sessionMenuOpen = ref(false);
+const sessionQuery = ref("");
+const sessionInput = ref<HTMLInputElement>();
+/** 顶栏会话标签是否放不下（放不下时改为单个按钮 + 搜索浮层） */
+const tabsOverflow = ref(false);
+const titlebarEl = ref<HTMLElement>();
+const sessionsEl = ref<HTMLElement>();
+const dragEl = ref<HTMLElement>();
+/** 隐藏的等宽副本，用于测量全部标签的自然宽度 */
+const tabsGhostEl = ref<HTMLElement>();
+let titlebarObserver: ResizeObserver | undefined;
+
+/** 比较标签自然宽度与可用空间，决定展示标签还是「更多」按钮 */
+function updateTabsOverflow() {
+  const ghost = tabsGhostEl.value;
+  if (!ghost) return;
+  const natural = ghost.offsetWidth;
+  // 可用宽度 = 当前会话区已占宽度 + 可被挤占的拖拽区宽度（保留 20px 最小拖拽区）
+  const available =
+    (sessionsEl.value?.offsetWidth ?? 0) + (dragEl.value?.offsetWidth ?? 0) - 20;
+  const next = natural > available;
+  if (tabsOverflow.value === next) return;
+  tabsOverflow.value = next;
+  sessionMenuOpen.value = false;
+}
+
+/** 会话增删或重命名后重新评估标签是否放得下 */
+watch(
+  () => sessions.value.map((s) => sessionLabel(s)).join("|"),
+  () => void nextTick(updateTabsOverflow),
+);
+
+/** 页面切换会增减顶栏按钮，可用宽度随之变化 */
+watch(page, () => void nextTick(updateTabsOverflow));
+
 /** 当前展开更多菜单的卡片 id */
 const menuFor = ref<string | null>(null);
 /** 主页展示模式：分组 / 最近打开 */
@@ -41,6 +77,7 @@ function toggleMenu(id: string) {
 /** 点击页面空白处收起浮层 */
 function closePopups() {
   menuFor.value = null;
+  sessionMenuOpen.value = false;
   if (!searchOpen.value) return;
   searchOpen.value = false;
   // 顶栏搜索与主页搜索共用 query，退出顶栏搜索时清空，避免主页被残留过滤
@@ -49,6 +86,32 @@ function closePopups() {
 
 function toggleSearch() {
   searchOpen.value = !searchOpen.value;
+}
+
+/** 会话列表浮层开关，与服务器搜索浮层互斥 */
+function toggleSessionMenu() {
+  searchOpen.value = false;
+  sessionMenuOpen.value = !sessionMenuOpen.value;
+}
+
+watch(sessionMenuOpen, (open) => {
+  if (open) void nextTick(() => sessionInput.value?.focus());
+  else sessionQuery.value = "";
+});
+
+/** 已打开终端按关键词过滤：备注名、IP、用户名 */
+const filteredSessions = computed(() => {
+  const q = sessionQuery.value.trim().toLowerCase();
+  if (!q) return sessions.value;
+  return sessions.value.filter((s) =>
+    [sessionLabel(s), s.host, s.user].some((v) => (v || "").toLowerCase().includes(q)),
+  );
+});
+
+/** 从会话列表跳到对应终端 */
+function pickSession(id: string) {
+  sessionMenuOpen.value = false;
+  openSession(id);
 }
 
 function pickHost(h: HostConfig) {
@@ -205,6 +268,12 @@ function closeWin() {
 onMounted(async () => {
   startEventBridge();
   void refreshMax();
+  // 窗口尺寸变化时重新判断顶栏会话标签是否放得下
+  if (typeof ResizeObserver !== "undefined" && titlebarEl.value) {
+    titlebarObserver = new ResizeObserver(() => updateTabsOverflow());
+    titlebarObserver.observe(titlebarEl.value);
+  }
+  void nextTick(updateTabsOverflow);
   try {
     encodings.value = (await SSH.Encodings()) ?? encodings.value;
   } catch {
@@ -212,6 +281,8 @@ onMounted(async () => {
   }
   await loadHosts();
 });
+
+onBeforeUnmount(() => titlebarObserver?.disconnect());
 
 function openNew() {
   editing.value = null;
@@ -262,6 +333,7 @@ function openSession(id: string) {
 function closeSession(id: string) {
   const rest = sessions.value.filter((s) => s.id !== id);
   void disconnect(id);
+  if (!rest.length) sessionMenuOpen.value = false;
   if (!rest.length && page.value === "term") page.value = "home";
 }
 </script>
@@ -269,7 +341,7 @@ function closeSession(id: string) {
 <template>
   <div class="app" @contextmenu.prevent @click="closePopups">
     <!-- 第一行：品牌 + SFTP + 窗口控制 -->
-    <header class="titlebar">
+    <header ref="titlebarEl" class="titlebar">
       <div class="tb-brand">
         <span class="logo">⌁</span>
         <strong>Shuttle</strong>
@@ -305,20 +377,79 @@ function closeSession(id: string) {
         SFTP
       </button>
 
-      <!-- 已打开的服务器会话标签，常驻顶栏 -->
-      <div v-if="sessions.length" class="tb-tabs" style="--wails-draggable: no-drag">
-        <button
-          v-for="s in sessions"
-          :key="s.id"
-          class="tb-tab"
-          :class="{ on: page === 'term' && s.id === activeId }"
-          :title="sessionLabel(s)"
-          @click="openSession(s.id)"
-        >
-          <span class="dot" :class="s.status" />
-          <span class="tb-tab-label">{{ sessionLabel(s) }}</span>
-          <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
-        </button>
+      <!-- 已打开的服务器会话：放得下就平铺标签，放不下收成单个按钮 + 搜索浮层 -->
+      <div
+        v-if="sessions.length"
+        ref="sessionsEl"
+        class="tb-sessions"
+        style="--wails-draggable: no-drag"
+      >
+        <div v-if="!tabsOverflow" class="tb-tabs">
+          <button
+            v-for="s in sessions"
+            :key="s.id"
+            class="tb-tab"
+            :class="{ on: page === 'term' && s.id === activeId }"
+            :title="`${sessionLabel(s)} · ${s.user}@${s.host}:${s.port}`"
+            @click="openSession(s.id)"
+          >
+            <span class="dot" :class="s.status" />
+            <span class="tb-tab-label">{{ sessionLabel(s) }}</span>
+            <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
+          </button>
+        </div>
+
+        <template v-else>
+          <button
+            class="tb-btn tb-session-btn"
+            :class="{ on: sessionMenuOpen }"
+            :title="`已打开 ${sessions.length} 个终端`"
+            @click.stop="toggleSessionMenu"
+          >
+            <svg viewBox="0 0 20 20">
+              <rect x="2.6" y="4" width="14.8" height="12" rx="1.8" />
+              <path d="M5.8 8.2l2.3 2-2.3 2M10 12.4h4.2" />
+            </svg>
+            终端
+            <span class="tb-count">{{ sessions.length }}</span>
+          </button>
+
+          <div v-if="sessionMenuOpen" class="search-pop session-pop" @click.stop>
+            <div class="sp-input">
+              <input
+                ref="sessionInput"
+                v-model="sessionQuery"
+                placeholder="搜索已打开的终端"
+                @keydown.esc="sessionMenuOpen = false"
+              />
+            </div>
+            <div class="sp-list">
+              <div
+                v-for="s in filteredSessions"
+                :key="s.id"
+                class="sp-item sp-session"
+                :class="{ on: page === 'term' && s.id === activeId }"
+                :title="`${s.user}@${s.host}:${s.port}`"
+                @click="pickSession(s.id)"
+              >
+                <span class="dot" :class="s.status" />
+                <span class="sp-name">{{ sessionLabel(s) }}</span>
+                <span class="sp-meta">{{ s.user }}@{{ s.host }}</span>
+                <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
+              </div>
+              <p v-if="!filteredSessions.length" class="sp-empty">没有匹配的终端</p>
+            </div>
+          </div>
+        </template>
+
+        <!-- 隐藏副本：不参与布局，仅用于测量全部标签的自然宽度 -->
+        <div ref="tabsGhostEl" class="tb-tabs tb-tabs-ghost" aria-hidden="true">
+          <button v-for="s in sessions" :key="s.id" class="tb-tab" tabindex="-1">
+            <span class="dot" :class="s.status" />
+            <span class="tb-tab-label">{{ sessionLabel(s) }}</span>
+            <span class="x">×</span>
+          </button>
+        </div>
       </div>
 
       <!-- 非主页时用「+」弹出服务器搜索 -->
@@ -362,7 +493,7 @@ function closeSession(id: string) {
         </div>
       </div>
 
-      <div class="tb-drag" style="--wails-draggable: drag" />
+      <div ref="dragEl" class="tb-drag" style="--wails-draggable: drag" />
 
       <div class="tb-controls" style="--wails-draggable: no-drag">
         <button class="win-btn" title="最小化" @click="minimise">
@@ -524,7 +655,7 @@ function closeSession(id: string) {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 32px;
+  height: 38px;
   flex: none;
   padding-left: 10px;
   background: var(--win-chrome);
@@ -539,38 +670,38 @@ function closeSession(id: string) {
   padding-right: 2px;
 }
 .tb-brand strong {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.2px;
 }
 .logo {
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
   background: var(--win-accent);
   color: #06121f;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 .tb-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 11px;
+  height: 28px;
+  padding: 0 13px;
   border: 1px solid var(--win-stroke);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--win-fill);
   color: var(--win-text);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: default;
 }
 .tb-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   fill: none;
   stroke: var(--win-accent);
   stroke-width: 1.4;
@@ -596,36 +727,46 @@ function closeSession(id: string) {
 }
 .tb-plus {
   padding: 0;
-  width: 26px;
+  width: 30px;
   justify-content: center;
 }
 
-/* 顶栏会话标签 */
+/* 顶栏已打开终端：标签放不下时收成单个按钮 + 数量角标 */
+.tb-sessions {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .tb-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden;
 }
-.tb-tabs::-webkit-scrollbar {
-  display: none;
+/* 隐藏副本：绝对定位、不参与布局，用于测量标签总宽度 */
+.tb-tabs-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  overflow: visible;
+  visibility: hidden;
+  pointer-events: none;
 }
 .tb-tab {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: none;
-  max-width: 180px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 6px;
+  max-width: 190px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
   border: 1px solid var(--win-stroke);
   background: var(--win-fill);
   color: var(--win-text-2);
-  font-size: 11.5px;
+  font-size: 12.5px;
   cursor: default;
 }
 .tb-tab:hover {
@@ -645,16 +786,56 @@ function closeSession(id: string) {
 }
 .tb-tab .x {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   display: grid;
   place-items: center;
   border-radius: 4px;
   color: var(--win-text-3);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
 }
 .tb-tab .x:hover {
+  background: var(--win-fill-press);
+  color: var(--win-err);
+}
+.tb-session-btn {
+  gap: 7px;
+}
+.tb-count {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.session-pop {
+  width: 320px;
+}
+.sp-session {
+  cursor: default;
+}
+.sp-session.on {
+  background: var(--win-fill-press);
+}
+.sp-session .x {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--win-text-3);
+  font-size: 14px;
+  line-height: 1;
+}
+.sp-session .x:hover {
   background: var(--win-fill-press);
   color: var(--win-err);
 }
