@@ -184,11 +184,33 @@ export function blankHost(): HostConfig {
 
 // ---------------------------------------------------------------- 会话操作
 
+/** 同一服务器重复打开时，依次命名为「副本1」「副本2」… 避免标签重名。 */
+function nextSessionName(base: string): string {
+  const prefix = `${base} 副本`;
+  let max = 0;
+  let seen = false;
+  for (const s of sessions.value) {
+    const label = sessionLabel(s);
+    if (label === base) {
+      seen = true;
+      continue;
+    }
+    if (!label.startsWith(prefix)) continue;
+    const n = Number.parseInt(label.slice(prefix.length), 10);
+    if (Number.isFinite(n)) {
+      seen = true;
+      if (n > max) max = n;
+    }
+  }
+  return seen ? `${prefix}${max + 1}` : base;
+}
+
 export async function connect(cfg: HostConfig) {
   const sessionId = newSessionId();
+  const name = nextSessionName(cfg.name || `${cfg.user}@${cfg.host}`);
   const info: SessionInfo = {
     id: sessionId,
-    name: cfg.name || "",
+    name,
     host: cfg.host,
     port: cfg.port,
     user: cfg.user,
@@ -205,7 +227,7 @@ export async function connect(cfg: HostConfig) {
 
   try {
     const real = await SSH.Connect({ ...cfg, sessionId });
-    Object.assign(info, real, { id: sessionId });
+    Object.assign(info, real, { id: sessionId, name });
   } catch (e) {
     info.status = "error";
     info.message = String(e);

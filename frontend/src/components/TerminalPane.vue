@@ -9,11 +9,8 @@ import {
   activeId,
   isConnected,
   registerTerminal,
-  removeSession,
   resizeSession,
-  selectedIds,
   sendKeys,
-  sessionLabel,
 } from "../store";
 import type { SessionInfo } from "../../bindings/shuttle/internal/sshcore/models";
 
@@ -33,14 +30,6 @@ let unregister: (() => void) | undefined;
 let observer: ResizeObserver | undefined;
 
 const connected = computed(() => isConnected(props.session));
-const isActive = computed(() => activeId.value === props.session.id);
-const checked = computed({
-  get: () => selectedIds.has(props.session.id),
-  set: (v: boolean) => {
-    if (v) selectedIds.add(props.session.id);
-    else selectedIds.delete(props.session.id);
-  },
-});
 
 const statusText = computed(() => {
   switch (props.session.status) {
@@ -161,39 +150,13 @@ function focus() {
 <template>
   <section
     class="pane"
-    :class="{ active: isActive, offline: !connected }"
     :style="{ display: visible ? 'flex' : 'none' }"
     @mousedown="activate"
   >
-    <header class="pane-head">
-      <label class="pick" @click.stop>
-        <input v-model="checked" type="checkbox" :disabled="!connected" />
-      </label>
-      <span
-        class="dot"
-        :class="session.status"
-        :title="statusText"
-      />
-      <div class="titles" @click="activate">
-        <strong>{{ sessionLabel(session) }}</strong>
-        <small>{{ session.user }}@{{ session.host }}:{{ session.port }}</small>
-      </div>
-      <span class="enc" :title="'字符编码：' + session.encoding">{{ session.encoding }}</span>
-      <button class="icon" title="聚焦终端" @click.stop="focus">
-        <svg viewBox="0 0 16 16">
-          <circle cx="8" cy="8" r="2.2" />
-          <path d="M8 1.5v2.4M8 12.1v2.4M1.5 8h2.4M12.1 8h2.4" />
-        </svg>
-      </button>
-      <button class="icon danger" title="关闭会话" @click.stop="removeSession(session.id)">
-        <svg viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" /></svg>
-      </button>
-    </header>
     <div ref="paneEl" class="pane-body" @click="activate">
       <div ref="bodyEl" class="term" />
       <div v-if="!connected" class="overlay">
         <span>{{ statusText }}</span>
-        <small v-if="session.message">{{ session.message }}</small>
       </div>
     </div>
   </section>
@@ -206,119 +169,13 @@ function focus() {
   min-width: 0;
   min-height: 0;
   background: var(--win-term);
-  border: 1px solid var(--win-stroke);
-  border-radius: var(--win-radius-lg);
   overflow: hidden;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.pane.active {
-  border-color: rgba(61, 220, 132, 0.5);
-  box-shadow: 0 0 0 1px rgba(61, 220, 132, 0.16);
-}
-.pane-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  background: var(--win-nav);
-  border-bottom: 1px solid var(--win-stroke);
-  font-size: 12px;
-  flex: none;
-}
-.pane.active .pane-head {
-  background: #1f232a;
-}
-.pick {
-  display: flex;
-  align-items: center;
-}
-.pick input {
-  accent-color: var(--win-accent);
-  cursor: default;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--win-text-3);
-}
-.dot.connected {
-  background: var(--win-ok);
-}
-.dot.connecting {
-  background: #ffd35c;
-  animation: pulse 1s ease-in-out infinite;
-}
-.dot.error {
-  background: #ff6b6b;
-}
-@keyframes pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-.titles {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-  cursor: default;
-}
-.titles strong {
-  color: var(--win-text);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.titles small {
-  color: var(--win-text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.enc {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: var(--win-radius);
-  background: var(--win-fill);
-  color: var(--win-text-3);
-  font-size: 10px;
-}
-.icon {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--win-radius);
-  background: transparent;
-  color: var(--win-text-2);
-  cursor: default;
-}
-.icon svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.3;
-  stroke-linecap: round;
-}
-.icon:hover {
-  background: var(--win-fill-hover);
-  color: var(--win-text);
-}
-.icon.danger:hover {
-  background: rgba(255, 107, 107, 0.2);
-  color: #ff9b9b;
 }
 .pane-body {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 4px 6px 6px;
+  padding: 6px 8px;
 }
 .term {
   width: 100%;
@@ -337,11 +194,6 @@ function focus() {
   font-size: 13px;
   text-align: center;
   padding: 0 16px;
-}
-.overlay small {
-  color: var(--win-text-3);
-  font-size: 11px;
-  word-break: break-all;
 }
 :deep(.xterm-viewport) {
   scrollbar-width: thin;

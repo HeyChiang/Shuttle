@@ -1126,8 +1126,7 @@ function closeSession(id: string) {
 .terminals {
   flex: 1;
   min-height: 0;
-  padding: 8px;
-  overflow: auto;
+  overflow: hidden;
 }
 .terminals > :deep(.pane) {
   height: 100%;
