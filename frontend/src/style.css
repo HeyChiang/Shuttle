@@ -1,0 +1,128 @@
+/* 全局样式：Termius 风格深色设计令牌 + 桌面应用基础重置。
+   目标是消除浏览器默认行为（body 外边距、页面级滚动条、默认字体），
+   让整体观感更接近原生桌面 SSH 客户端。 */
+
+:root {
+  color-scheme: dark;
+
+  /* 表面 */
+  --win-bg: #15171c;
+  --win-chrome: #15171c;
+  --win-nav: #1a1d23;
+  --win-card: #1c1f26;
+  --win-term: #16181d;
+  --win-flyout: #1e2128;
+
+  /* 控件填充 */
+  --win-fill: #21252c;
+  --win-fill-hover: #262b33;
+  --win-fill-press: #2d323b;
+
+  /* 描边 / 分隔 */
+  --win-stroke: #24282f;
+  --win-stroke-strong: #2f343d;
+  --win-divider: #22262d;
+
+  /* 文字 */
+  --win-text: #e8ebf1;
+  --win-text-2: #a3abb8;
+  --win-text-3: #767f8d;
+  --win-text-disabled: #4e5561;
+
+  /* 强调色（品牌绿，填充时配深色文字） */
+  --win-accent: #3ddc84;
+  --win-accent-hover: #52e694;
+  --win-accent-press: #2fca76;
+  --win-accent-text: #07170e;
+  --win-accent-soft: rgba(61, 220, 132, 0.13);
+
+  --win-close: #e5484d;
+  --win-ok: #3ddc84;
+  --win-err: #ff6b6b;
+  --win-warn: #ffb454;
+
+  --win-radius: 6px;
+  --win-radius-lg: 10px;
+
+  --win-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --win-mono: "JetBrains Mono", "Cascadia Mono", "Cascadia Code", Consolas,
+    "Microsoft YaHei UI", monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--win-bg);
+  color: var(--win-text);
+  font-family: var(--win-font);
+  font-size: 13px;
+  line-height: 1.5;
+  /* 桌面应用不应出现页面级滚动 */
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  height: 100%;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
+
+/* 输入区域恢复文本选择 */
+input,
+textarea,
+[contenteditable],
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+::selection {
+  background: var(--win-accent-soft);
+  color: var(--win-text);
+}
+
+/* 细滚动条：仅在内容超出时出现，视觉更克制 */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.26);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
