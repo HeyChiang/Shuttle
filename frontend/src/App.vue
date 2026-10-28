@@ -31,6 +31,8 @@ const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement>();
 /** 当前展开更多菜单的卡片 id */
 const menuFor = ref<string | null>(null);
+/** 主页展示模式：分组 / 最近打开 */
+const homeMode = ref<"group" | "recent">("group");
 
 function toggleMenu(id: string) {
   menuFor.value = menuFor.value === id ? null : id;
@@ -53,6 +55,17 @@ function pickHost(h: HostConfig) {
   searchOpen.value = false;
   query.value = "";
   connectHost(h);
+}
+
+/** 顶栏搜索框列表：无关键词时展示最近打开，输入后搜索全部服务器 */
+const paletteHosts = computed(() =>
+  query.value.trim() ? filteredHosts.value : recentHosts.value,
+);
+
+/** 顶栏搜索框回车：打开列表第一条 */
+function openFirstMatch() {
+  const first = paletteHosts.value[0];
+  if (first) pickHost(first);
 }
 
 watch(searchOpen, (open) => {
@@ -103,6 +116,70 @@ const groupedHosts = computed(() => {
   }
   return [...groups].map(([name, list]) => ({ name, hosts: list }));
 });
+
+/* ------------------------------------------------------- 最近打开的服务器 */
+
+const RECENT_KEY = "shuttle.recentHosts";
+type RecentEntry = { id: string; at: number };
+
+function readRecent(): RecentEntry[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const list = raw ? (JSON.parse(raw) as RecentEntry[]) : [];
+    return list.filter((e) => e && typeof e.id === "string" && typeof e.at === "number");
+  } catch {
+    return [];
+  }
+}
+
+const recentEntries = ref<RecentEntry[]>(readRecent());
+
+/** 记录一次打开；同一服务器只保留最新一条 */
+function markRecent(id: string) {
+  if (!id) return;
+  recentEntries.value = [
+    { id, at: Date.now() },
+    ...recentEntries.value.filter((e) => e.id !== id),
+  ].slice(0, 30);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recentEntries.value));
+  } catch {
+    /* 忽略存储失败 */
+  }
+}
+
+/** 最近打开且仍存在（并符合当前搜索）的服务器，按时间倒序 */
+const recentHosts = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  return recentEntries.value
+    .map((e) => hosts.value.find((h) => h.id === e.id))
+    .filter((h): h is HostConfig => !!h)
+    .filter(
+      (h) => !q || [h.host, h.name, h.group].some((v) => (v || "").toLowerCase().includes(q)),
+    );
+});
+
+/** 主页列表数据：分组模式按分组聚合，最近模式单列一栏 */
+const homeSections = computed(() => {
+  if (homeMode.value === "recent") {
+    return recentHosts.value.length
+      ? [{ name: "最近打开", hosts: recentHosts.value, recent: true }]
+      : [];
+  }
+  return groupedHosts.value
+    .filter((g) => g.hosts.length)
+    .map((g) => ({ ...g, recent: false }));
+});
+
+function recentLabel(id: string): string {
+  const at = recentEntries.value.find((e) => e.id === id)?.at ?? 0;
+  if (!at) return "";
+  const diff = Date.now() - at;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return new Date(at).toLocaleDateString();
+}
 
 async function refreshMax() {
   try {
@@ -172,13 +249,20 @@ function duplicateHost(host: HostConfig) {
 
 function connectHost(host: HostConfig) {
   page.value = "term";
+  markRecent(host.id);
   void connect(host);
+}
+
+/** 点击顶部会话标签：切换焦点并回到终端视图 */
+function openSession(id: string) {
+  activeId.value = id;
+  page.value = "term";
 }
 
 function closeSession(id: string) {
   const rest = sessions.value.filter((s) => s.id !== id);
   void disconnect(id);
-  if (!rest.length) page.value = "home";
+  if (!rest.length && page.value === "term") page.value = "home";
 }
 </script>
 
@@ -190,6 +274,20 @@ function closeSession(id: string) {
         <span class="logo">⌁</span>
         <strong>Shuttle</strong>
       </div>
+
+      <button
+        class="tb-btn"
+        style="--wails-draggable: no-drag"
+        :class="{ on: page === 'home' }"
+        title="主页"
+        @click="page = 'home'"
+      >
+        <svg viewBox="0 0 20 20">
+          <path d="M3.2 9.6L10 4l6.8 5.6" />
+          <path d="M5.4 8.8v6.6a1 1 0 0 0 1 1h7.2a1 1 0 0 0 1-1V8.8" />
+        </svg>
+        主页
+      </button>
 
       <button
         class="tb-btn"
@@ -207,19 +305,21 @@ function closeSession(id: string) {
         SFTP
       </button>
 
-      <button
-        v-if="page !== 'home'"
-        class="tb-btn"
-        style="--wails-draggable: no-drag"
-        title="返回主页"
-        @click="page = 'home'"
-      >
-        <svg viewBox="0 0 20 20">
-          <path d="M3.2 9.6L10 4l6.8 5.6" />
-          <path d="M5.4 8.8v6.6a1 1 0 0 0 1 1h7.2a1 1 0 0 0 1-1V8.8" />
-        </svg>
-        主页
-      </button>
+      <!-- 已打开的服务器会话标签，常驻顶栏 -->
+      <div v-if="sessions.length" class="tb-tabs" style="--wails-draggable: no-drag">
+        <button
+          v-for="s in sessions"
+          :key="s.id"
+          class="tb-tab"
+          :class="{ on: page === 'term' && s.id === activeId }"
+          :title="sessionLabel(s)"
+          @click="openSession(s.id)"
+        >
+          <span class="dot" :class="s.status" />
+          <span class="tb-tab-label">{{ sessionLabel(s) }}</span>
+          <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
+        </button>
+      </div>
 
       <!-- 非主页时用「+」弹出服务器搜索 -->
       <div v-if="page !== 'home'" class="tb-search" style="--wails-draggable: no-drag">
@@ -236,40 +336,29 @@ function closeSession(id: string) {
 
         <div v-if="searchOpen" class="search-pop" @click.stop>
           <div class="sp-input">
-            <svg class="s-ico" viewBox="0 0 16 16">
-              <circle cx="7" cy="7" r="4.4" />
-              <path d="M10.4 10.4L14 14" />
-            </svg>
             <input
               ref="searchInput"
               v-model="query"
               placeholder="搜索服务器"
               @keydown.esc="searchOpen = false"
+              @keydown.enter="openFirstMatch"
             />
           </div>
+          <!-- 第一行搜索框，下面默认展示最近打开的服务器，输入后搜索全部 -->
           <div class="sp-list">
             <button
-              v-for="h in filteredHosts"
+              v-for="h in paletteHosts"
               :key="h.id"
               class="sp-item"
               @click="pickHost(h)"
             >
-              <span
-                class="avatar xs"
-                :style="{ background: avatarColor(h.name || h.host) }"
-              >
-                {{ initialOf(h.name || h.host) }}
-              </span>
-              <span class="sp-who">
-                <strong>{{ h.name || h.host }}</strong>
-                <small>{{ h.user }}@{{ h.host }}:{{ h.port }}</small>
-              </span>
+              <span class="sp-name">{{ h.name || h.host }}</span>
+              <span class="sp-meta">{{ h.user }}@{{ h.host }}:{{ h.port }}</span>
             </button>
-            <p v-if="!filteredHosts.length" class="sp-empty">没有匹配的服务器</p>
+            <p v-if="!paletteHosts.length" class="sp-empty">
+              {{ query.trim() ? "没有匹配的服务器" : "还没有最近打开的服务器" }}
+            </p>
           </div>
-          <button class="sp-new" @click="searchOpen = false; openNew()">
-            + 新建服务器
-          </button>
         </div>
       </div>
 
@@ -305,18 +394,21 @@ function closeSession(id: string) {
       <section v-show="page === 'home'" class="list-view">
         <div class="list-head">
           <div class="lh-text">
-            <h2>服务器</h2>
+            <h2>{{ homeMode === "group" ? "服务器" : "最近打开" }}</h2>
           </div>
-          <div class="lh-tools">
-            <button v-if="sessions.length" class="btn ghost" @click="page = 'term'">
-              返回终端 · {{ sessions.length }}
+          <div class="seg">
+            <button :class="{ on: homeMode === 'group' }" @click="homeMode = 'group'">
+              分组
+            </button>
+            <button :class="{ on: homeMode === 'recent' }" @click="homeMode = 'recent'">
+              最近打开
             </button>
           </div>
         </div>
 
-        <div class="cards">
-          <section v-for="g in groupedHosts" :key="g.name" class="group">
-            <header class="group-head">
+        <div v-if="homeSections.length" class="cards">
+          <section v-for="g in homeSections" :key="g.name" class="group">
+            <header v-if="!g.recent" class="group-head">
               <span class="group-name">{{ g.name }}</span>
               <span class="group-count">{{ g.hosts.length }} 台服务器</span>
             </header>
@@ -362,6 +454,9 @@ function closeSession(id: string) {
                 <div class="tags">
                   <span class="tag">{{ authLabel(h) }}</span>
                   <span class="tag">{{ h.encoding }}</span>
+                  <span v-if="g.recent && recentLabel(h.id)" class="tag">
+                    {{ recentLabel(h.id) }}
+                  </span>
                 </div>
               </article>
             </div>
@@ -373,29 +468,17 @@ function closeSession(id: string) {
           <p>点击上方「新增服务器」添加第一条 SSH 连接信息。</p>
           <button class="btn primary" @click="openNew">新增服务器</button>
         </div>
-        <div v-else-if="!filteredHosts.length" class="empty-state">
+        <div v-else-if="!homeSections.length && homeMode === 'recent' && !query.trim()" class="empty-state">
+          <h3>还没有最近打开的服务器</h3>
+          <p>连接任意服务器后，会按时间顺序记录在这里。</p>
+        </div>
+        <div v-else-if="!homeSections.length" class="empty-state">
           <h3>没有匹配的服务器</h3>
           <p>换个 IP 或备注名试试。</p>
         </div>
       </section>
 
       <section v-show="page === 'term'" class="term-view">
-        <div class="term-bar">
-          <div class="tabs">
-            <button
-              v-for="s in sessions"
-              :key="s.id"
-              class="tab"
-              :class="{ on: s.id === activeId }"
-              @click="activeId = s.id"
-            >
-              <span class="dot" :class="s.status" />
-              {{ sessionLabel(s) }}
-              <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
-            </button>
-          </div>
-        </div>
-
         <div class="terminals">
           <TerminalPane
             v-for="s in sessions"
@@ -517,6 +600,65 @@ function closeSession(id: string) {
   justify-content: center;
 }
 
+/* 顶栏会话标签 */
+.tb-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tb-tabs::-webkit-scrollbar {
+  display: none;
+}
+.tb-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 180px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--win-stroke);
+  background: var(--win-fill);
+  color: var(--win-text-2);
+  font-size: 11.5px;
+  cursor: default;
+}
+.tb-tab:hover {
+  background: var(--win-fill-hover);
+  border-color: var(--win-stroke-strong);
+}
+.tb-tab.on {
+  background: var(--win-fill-press);
+  border-color: var(--win-stroke-strong);
+  color: var(--win-text);
+}
+.tb-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-tab .x {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--win-text-3);
+  font-size: 13px;
+  line-height: 1;
+}
+.tb-tab .x:hover {
+  background: var(--win-fill-press);
+  color: var(--win-err);
+}
+
 /* 顶栏搜索浮层 */
 .tb-search {
   position: relative;
@@ -539,14 +681,17 @@ function closeSession(id: string) {
 .sp-input {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 8px;
   flex: none;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--win-stroke-strong);
+  border-radius: 7px;
+  background: var(--win-fill-press);
 }
 .sp-input input {
   flex: 1;
   min-width: 0;
-  height: 32px;
+  height: 28px;
   border: 0;
   background: transparent;
   color: var(--win-text);
@@ -564,9 +709,9 @@ function closeSession(id: string) {
 .sp-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 8px 9px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -577,19 +722,18 @@ function closeSession(id: string) {
 .sp-item:hover {
   background: var(--win-fill-hover);
 }
-.sp-who {
-  display: flex;
-  flex-direction: column;
+.sp-name {
+  flex: 1 1 auto;
   min-width: 0;
-}
-.sp-who strong {
   font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sp-who small {
+.sp-meta {
+  flex: none;
+  max-width: 62%;
   color: var(--win-text-3);
   font-size: 11px;
   font-family: var(--win-mono);
@@ -597,35 +741,12 @@ function closeSession(id: string) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.avatar.xs {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  font-size: 11px;
-}
 .sp-empty {
   margin: 0;
   padding: 14px 10px;
   color: var(--win-text-3);
   font-size: 12px;
   text-align: center;
-}
-.sp-new {
-  flex: none;
-  margin-top: 4px;
-  padding: 8px 10px;
-  border: 0;
-  border-top: 1px solid var(--win-stroke);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--win-text-2);
-  font-size: 12px;
-  text-align: left;
-  cursor: default;
-}
-.sp-new:hover {
-  background: var(--win-fill-hover);
-  color: var(--win-text);
 }
 .tb-drag {
   flex: 1;
@@ -731,9 +852,32 @@ function closeSession(id: string) {
   font-size: 15px;
   font-weight: 600;
 }
-.lh-tools {
+/* 分组 / 最近打开 切换 */
+.seg {
   display: flex;
-  gap: 8px;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 9px;
+  background: var(--win-fill);
+}
+.seg button {
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--win-text-2);
+  font-size: 12px;
+  cursor: default;
+}
+.seg button:hover {
+  color: var(--win-text);
+}
+.seg button.on {
+  background: var(--win-fill-press);
+  color: var(--win-text);
 }
 .cards {
   flex: 1;
@@ -963,44 +1107,6 @@ function closeSession(id: string) {
   display: flex;
   flex-direction: column;
 }
-.term-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--win-stroke);
-}
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-}
-.tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  height: 28px;
-  padding: 0 9px;
-  border-radius: 8px;
-  border: 1px solid var(--win-stroke);
-  background: var(--win-fill);
-  color: var(--win-text-2);
-  font-size: 12px;
-  cursor: default;
-}
-.tab:hover {
-  background: var(--win-fill-hover);
-}
-.tab.on {
-  border-color: var(--win-stroke-strong);
-  background: var(--win-fill-press);
-  color: var(--win-text);
-}
 .dot {
   width: 7px;
   height: 7px;
@@ -1016,20 +1122,6 @@ function closeSession(id: string) {
 }
 .dot.error {
   background: var(--win-err);
-}
-.tab .x {
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  border-radius: 4px;
-  color: var(--win-text-3);
-  font-size: 13px;
-  line-height: 1;
-}
-.tab .x:hover {
-  background: var(--win-fill-press);
-  color: var(--win-err);
 }
 .terminals {
   flex: 1;
