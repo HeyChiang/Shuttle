@@ -447,6 +447,7 @@ function closeSession(id: string) {
   z-index: 100;
   display: flex;
   align-items: center;
+  gap: 10px;
   height: 32px;
   flex: none;
   padding-left: 10px;
@@ -459,7 +460,7 @@ function closeSession(id: string) {
   align-items: center;
   gap: 7px;
   flex: none;
-  padding-right: 12px;
+  padding-right: 2px;
 }
 .tb-brand strong {
   font-size: 12px;

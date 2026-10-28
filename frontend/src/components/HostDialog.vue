@@ -1,9 +1,26 @@
 <script setup lang="ts">
 // 连接档案编辑弹窗。传入 host 时打开；保存后通过 submit 事件回传副本。
-import { reactive, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { HostConfig } from "../../bindings/shuttle/internal/sshcore/models";
 import { blankHost, encodings } from "../store";
+
+/** 常用终端类型（即远端 $TERM 取值），注释说明各自用途 */
+const TERM_TYPES = [
+  "xterm-256color", // 默认推荐：xterm 兼容 + 256 色，绝大多数 Linux 发行版与 TUI 程序识别良好
+  "xterm", // 基础 16 色 xterm，兼容极老软件或未安装 256 色 terminfo 的服务器
+  "xterm-16color", // 显式声明 16 色 xterm，遇到 256 色渲染异常时用于回退
+  "screen-256color", // 在 GNU screen 会话内使用，保证分屏复用下的 256 色与按键映射正常
+  "screen", // 老版 screen 的 16 色取值，供旧 screen 环境兼容
+  "tmux-256color", // 在 tmux 内使用，使 tmux 正确识别 256 色与终端能力
+  "vt100", // 最小 VT100 兼容，适配老式系统、网络设备、串口终端与极简 shell
+  "vt220", // VT220 兼容，部分老旧 Unix 或硬件设备只识别该类型
+  "linux", // Linux 本机控制台（tty）行为，模拟 console，不含 X11 特性
+  "ansi", // 通用 ANSI 最小集，兼容最广，但颜色与光标能力有限
+  "rxvt-unicode-256color", // urxvt（rxvt-unicode）模拟器的 256 色取值
+  "alacritty", // Alacritty 模拟器取值，支持真彩色与较新的终端能力
+  "dumb", // 哑终端：无光标控制、仅纯文本输出，适合脚本或避免控制符干扰排障
+];
 
 const props = defineProps<{ host: HostConfig | null }>();
 const emit = defineEmits<{
@@ -13,6 +30,13 @@ const emit = defineEmits<{
 
 const form = ref<HostConfig>(blankHost());
 const error = ref("");
+
+/** 若档案里已有自定义终端类型，则保留在选项首位 */
+const termOptions = computed(() => {
+  const cur = form.value.termType?.trim();
+  if (!cur || TERM_TYPES.includes(cur)) return TERM_TYPES;
+  return [cur, ...TERM_TYPES];
+});
 
 watch(
   () => props.host,
@@ -126,7 +150,9 @@ function submit() {
 
         <label>
           <span>终端类型</span>
-          <input v-model="form.termType" placeholder="xterm-256color" />
+          <select v-model="form.termType">
+            <option v-for="t in termOptions" :key="t" :value="t">{{ t }}</option>
+          </select>
         </label>
 
         <label>

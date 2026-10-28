@@ -121,6 +121,7 @@ onMounted(() => {
   requestAnimationFrame(() => {
     doFit();
     resizeSession(props.session.id, instance.cols, instance.rows);
+    if (props.visible) instance.focus();
   });
 
   if (paneEl.value && typeof ResizeObserver !== "undefined") {
@@ -138,7 +139,12 @@ onBeforeUnmount(() => {
 watch(
   () => props.visible,
   (v) => {
-    if (v) requestAnimationFrame(doFit);
+    if (!v) return;
+    // 面板变为可见（新建连接、切换标签、返回终端页）后自动聚焦，无需再手动点击
+    requestAnimationFrame(() => {
+      doFit();
+      focus();
+    });
   },
 );
 
