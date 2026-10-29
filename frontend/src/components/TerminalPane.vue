@@ -32,6 +32,9 @@ let observer: ResizeObserver | undefined;
 
 const connected = computed(() => isConnected(props.session));
 
+/** 正在建立连接：展示加载圈 */
+const connecting = computed(() => props.session.status === "connecting");
+
 const statusText = computed(() => {
   switch (props.session.status) {
     case "connected":
@@ -169,7 +172,12 @@ function focus() {
     <div ref="paneEl" class="pane-body" @click="activate">
       <div ref="bodyEl" class="term" />
       <div v-if="!connected" class="overlay" @click.stop>
-        <span class="overlay-title">{{ statusText }}</span>
+        <svg v-if="connecting" class="spinner" viewBox="0 0 48 48" aria-hidden="true">
+          <circle class="track" cx="24" cy="24" r="20" />
+          <circle class="arc" cx="24" cy="24" r="20" />
+        </svg>
+        <span class="overlay-title" :class="{ err: !connecting }">{{ statusText }}</span>
+        <p v-if="connecting" class="overlay-sub">{{ session.user }}@{{ session.host }}:{{ session.port }}</p>
         <p v-if="failMessage" class="overlay-msg">{{ failMessage }}</p>
         <button v-if="canRetry" class="overlay-retry" @click="retry">重新连接</button>
       </div>
@@ -211,8 +219,57 @@ function focus() {
   padding: 0 16px;
 }
 .overlay-title {
-  color: var(--win-err);
+  color: var(--win-text);
   font-weight: 600;
+}
+.overlay-title.err {
+  color: var(--win-err);
+}
+.overlay-sub {
+  margin: 0;
+  color: var(--win-text-3);
+  font-size: 11.5px;
+  font-family: var(--win-mono);
+}
+/* Material 风格不确定进度环 */
+.spinner {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 4px;
+}
+.spinner circle {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+}
+.spinner .track {
+  stroke: rgba(223, 227, 234, 0.14);
+}
+.spinner .arc {
+  stroke: var(--win-accent);
+  animation:
+    spinner-rotate 1.6s linear infinite,
+    spinner-dash 1.4s ease-in-out infinite;
+}
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes spinner-dash {
+  0% {
+    stroke-dasharray: 10, 116;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 90, 36;
+    stroke-dashoffset: -18;
+  }
+  100% {
+    stroke-dasharray: 90, 36;
+    stroke-dashoffset: -110;
+  }
 }
 .overlay-msg {
   margin: 0;
