@@ -32,6 +32,8 @@ export const syncInput = ref(false);
 export const selectedIds = reactive(new Set<string>());
 /** 当前聚焦的会话 */
 export const activeId = ref("");
+/** 会话 id -> 原始连接档案，用于断线后重新连接 */
+const sessionConfigs = new Map<string, HostConfig>();
 /** 广播命令的执行结果 */
 export const execResults = ref<ExecEvent[]>([]);
 /** 传输进度（最新的在前） */
@@ -224,6 +226,7 @@ export async function connect(cfg: HostConfig) {
   sessions.value = [...sessions.value, info];
   selectedIds.add(sessionId);
   activeId.value = sessionId;
+  sessionConfigs.set(sessionId, { ...cfg, sessionId });
 
   try {
     const real = await SSH.Connect({ ...cfg, sessionId });
@@ -231,6 +234,32 @@ export async function connect(cfg: HostConfig) {
   } catch (e) {
     info.status = "error";
     info.message = String(e);
+  }
+}
+
+/** 连接失败或已断开后，用原始档案重连当前会话（复用同一个终端面板）。 */
+export async function reconnect(id: string) {
+  const s = sessionById(id);
+  const cfg = sessionConfigs.get(id);
+  if (!s || !cfg) return;
+
+  s.status = "connecting";
+  s.message = "正在连接…";
+  s.connectedAt = 0;
+
+  // 后端可能仍保留旧会话（如远端断开），先清理再重连，避免 id 冲突。
+  try {
+    await SSH.Disconnect(id);
+  } catch {
+    /* 旧会话可能已不存在 */
+  }
+
+  try {
+    const real = await SSH.Connect({ ...cfg, sessionId: id });
+    Object.assign(s, real, { id, name: s.name });
+  } catch (e) {
+    s.status = "error";
+    s.message = String(e);
   }
 }
 
@@ -247,6 +276,7 @@ export function removeSession(id: string) {
   sessions.value = sessions.value.filter((s) => s.id !== id);
   selectedIds.delete(id);
   dataSinks.delete(id);
+  sessionConfigs.delete(id);
   if (activeId.value === id) {
     activeId.value = sessions.value[0]?.id ?? "";
   }

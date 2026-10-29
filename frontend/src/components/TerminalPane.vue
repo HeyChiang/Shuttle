@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   activeId,
   isConnected,
+  reconnect,
   registerTerminal,
   resizeSession,
   sendKeys,
@@ -43,6 +44,18 @@ const statusText = computed(() => {
       return "已断开";
   }
 });
+
+/** 连接失败/已断开时可以手动重连 */
+const canRetry = computed(
+  () => props.session.status === "error" || props.session.status === "closed",
+);
+
+/** 失败原因，仅在可重连状态下展示 */
+const failMessage = computed(() => (canRetry.value ? props.session.message : ""));
+
+function retry() {
+  void reconnect(props.session.id);
+}
 
 function doFit() {
   if (!fit || !paneEl.value || !props.visible) return;
@@ -155,8 +168,10 @@ function focus() {
   >
     <div ref="paneEl" class="pane-body" @click="activate">
       <div ref="bodyEl" class="term" />
-      <div v-if="!connected" class="overlay">
-        <span>{{ statusText }}</span>
+      <div v-if="!connected" class="overlay" @click.stop>
+        <span class="overlay-title">{{ statusText }}</span>
+        <p v-if="failMessage" class="overlay-msg">{{ failMessage }}</p>
+        <button v-if="canRetry" class="overlay-retry" @click="retry">重新连接</button>
       </div>
     </div>
   </section>
@@ -190,10 +205,43 @@ function focus() {
   justify-content: center;
   gap: 6px;
   background: rgba(22, 24, 29, 0.88);
-  color: var(--win-err);
+  color: var(--win-text-2);
   font-size: 13px;
   text-align: center;
   padding: 0 16px;
+}
+.overlay-title {
+  color: var(--win-err);
+  font-weight: 600;
+}
+.overlay-msg {
+  margin: 0;
+  max-width: 560px;
+  max-height: 40vh;
+  overflow: auto;
+  color: var(--win-text-2);
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.overlay-retry {
+  margin-top: 6px;
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--win-accent);
+  color: var(--win-accent-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: default;
+}
+.overlay-retry:hover {
+  background: var(--win-accent-hover);
+}
+.overlay-retry:active {
+  background: var(--win-accent-press);
 }
 :deep(.xterm-viewport) {
   scrollbar-width: thin;
