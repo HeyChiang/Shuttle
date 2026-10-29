@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/pkg/sftp v1.13.12
-	github.com/wailsapp/wails/v3 v3.0.0-beta.34
+	github.com/wailsapp/wails/v3 v3.0.0
 	github.com/xanzy/ssh-agent v0.3.3
 	golang.org/x/crypto v0.57.0
 	golang.org/x/text v0.42.0
