@@ -33,27 +33,69 @@ const searchInput = ref<HTMLInputElement>();
 const sessionMenuOpen = ref(false);
 const sessionQuery = ref("");
 const sessionInput = ref<HTMLInputElement>();
-/** 顶栏会话标签是否放不下（放不下时改为单个按钮 + 搜索浮层） */
+/** 顶栏会话标签是否放不下（放不下的部分收进「更多」按钮） */
 const tabsOverflow = ref(false);
+/** 顶栏平铺展示的标签数量，超出部分收进「更多」浮层 */
+const visibleTabCount = ref(Number.MAX_SAFE_INTEGER);
 const titlebarEl = ref<HTMLElement>();
 const sessionsEl = ref<HTMLElement>();
 const dragEl = ref<HTMLElement>();
-/** 隐藏的等宽副本，用于测量全部标签的自然宽度 */
+/** 隐藏的等宽副本，用于测量每个标签的自然宽度 */
 const tabsGhostEl = ref<HTMLElement>();
+/** 「更多」按钮，用于测量它自身占用的宽度 */
+const moreBtnEl = ref<HTMLElement>();
 let titlebarObserver: ResizeObserver | undefined;
 
-/** 比较标签自然宽度与可用空间，决定展示标签还是「更多」按钮 */
+/** 标签间距，需与 .tb-tabs / .tb-sessions 的 gap 保持一致 */
+const TAB_GAP = 4;
+/** 「更多」按钮未渲染时的宽度估算值 */
+const MORE_FALLBACK_WIDTH = 74;
+
+/** 平铺展示的标签 */
+const visibleTabs = computed(() => sessions.value.slice(0, visibleTabCount.value));
+/** 收进「更多」浮层的会话 */
+const hiddenSessions = computed(() => sessions.value.slice(visibleTabCount.value));
+
+/** 计算能放下多少个标签，剩余部分收进「更多」按钮 */
 function updateTabsOverflow() {
   const ghost = tabsGhostEl.value;
   if (!ghost) return;
-  const natural = ghost.offsetWidth;
+  const widths = Array.from(ghost.children).map((el) => (el as HTMLElement).offsetWidth);
+  if (!widths.length) {
+    tabsOverflow.value = false;
+    visibleTabCount.value = Number.MAX_SAFE_INTEGER;
+    return;
+  }
   // 可用宽度 = 当前会话区已占宽度 + 可被挤占的拖拽区宽度（保留 20px 最小拖拽区）
   const available =
     (sessionsEl.value?.offsetWidth ?? 0) + (dragEl.value?.offsetWidth ?? 0) - 20;
-  const next = natural > available;
-  if (tabsOverflow.value === next) return;
-  tabsOverflow.value = next;
-  sessionMenuOpen.value = false;
+  const natural = widths.reduce((sum, w, i) => sum + w + (i ? TAB_GAP : 0), 0);
+  const wasOverflow = tabsOverflow.value;
+
+  if (natural <= available) {
+    tabsOverflow.value = false;
+    visibleTabCount.value = Number.MAX_SAFE_INTEGER;
+    sessionMenuOpen.value = false;
+    return;
+  }
+
+  // 放不下时逐个累加标签宽度，直到再放一个就会挤掉「更多」按钮
+  const moreWidth = moreBtnEl.value?.offsetWidth ?? MORE_FALLBACK_WIDTH;
+  let used = 0;
+  let count = 0;
+  for (let i = 0; i < widths.length; i++) {
+    const next = used + widths[i] + (i ? TAB_GAP : 0);
+    if (next + TAB_GAP + moreWidth > available) break;
+    used = next;
+    count += 1;
+  }
+  tabsOverflow.value = true;
+  if (visibleTabCount.value !== count) {
+    visibleTabCount.value = count;
+    sessionMenuOpen.value = false;
+  }
+  // 「更多」按钮刚由不显示变为显示，等它渲染后按真实宽度再校正一次
+  if (!wasOverflow) void nextTick(updateTabsOverflow);
 }
 
 /** 会话增删或重命名后重新评估标签是否放得下 */
@@ -99,11 +141,11 @@ watch(sessionMenuOpen, (open) => {
   else sessionQuery.value = "";
 });
 
-/** 已打开终端按关键词过滤：备注名、IP、用户名 */
+/** 收起列表按关键词过滤：备注名、IP、用户名 */
 const filteredSessions = computed(() => {
   const q = sessionQuery.value.trim().toLowerCase();
-  if (!q) return sessions.value;
-  return sessions.value.filter((s) =>
+  if (!q) return hiddenSessions.value;
+  return hiddenSessions.value.filter((s) =>
     [sessionLabel(s), s.host, s.user].some((v) => (v || "").toLowerCase().includes(q)),
   );
 });
@@ -377,16 +419,16 @@ function closeSession(id: string) {
         SFTP
       </button>
 
-      <!-- 已打开的服务器会话：放得下就平铺标签，放不下收成单个按钮 + 搜索浮层 -->
+      <!-- 已打开的服务器会话：能放下多少就平铺多少，放不下的收进「更多」按钮 + 搜索浮层 -->
       <div
         v-if="sessions.length"
         ref="sessionsEl"
         class="tb-sessions"
         style="--wails-draggable: no-drag"
       >
-        <div v-if="!tabsOverflow" class="tb-tabs">
+        <div v-if="visibleTabs.length" class="tb-tabs">
           <button
-            v-for="s in sessions"
+            v-for="s in visibleTabs"
             :key="s.id"
             class="tb-tab"
             :class="{ on: page === 'term' && s.id === activeId }"
@@ -399,48 +441,49 @@ function closeSession(id: string) {
           </button>
         </div>
 
-        <template v-else>
-          <button
-            class="tb-btn tb-session-btn"
-            :class="{ on: sessionMenuOpen }"
-            :title="`已打开 ${sessions.length} 个终端`"
-            @click.stop="toggleSessionMenu"
-          >
-            <svg viewBox="0 0 20 20">
-              <rect x="2.6" y="4" width="14.8" height="12" rx="1.8" />
-              <path d="M5.8 8.2l2.3 2-2.3 2M10 12.4h4.2" />
-            </svg>
-            终端
-            <span class="tb-count">{{ sessions.length }}</span>
-          </button>
+        <button
+          v-if="tabsOverflow"
+          ref="moreBtnEl"
+          class="tb-btn tb-session-btn tb-more"
+          :class="{ on: sessionMenuOpen }"
+          :title="`还有 ${hiddenSessions.length} 个终端`"
+          @click.stop="toggleSessionMenu"
+        >
+          <svg viewBox="0 0 20 20">
+            <rect x="2.6" y="4" width="14.8" height="12" rx="1.8" />
+            <path d="M5.8 8.2l2.3 2-2.3 2M10 12.4h4.2" />
+          </svg>
+          <span class="tb-count">{{ hiddenSessions.length }}</span>
+        </button>
 
-          <div v-if="sessionMenuOpen" class="search-pop session-pop" @click.stop>
-            <div class="sp-input">
-              <input
-                ref="sessionInput"
-                v-model="sessionQuery"
-                placeholder="搜索已打开的终端"
-                @keydown.esc="sessionMenuOpen = false"
-              />
-            </div>
-            <div class="sp-list">
-              <div
-                v-for="s in filteredSessions"
-                :key="s.id"
-                class="sp-item sp-session"
-                :class="{ on: page === 'term' && s.id === activeId }"
-                :title="`${s.user}@${s.host}:${s.port}`"
-                @click="pickSession(s.id)"
-              >
-                <span class="dot" :class="s.status" />
-                <span class="sp-name">{{ sessionLabel(s) }}</span>
-                <span class="sp-meta">{{ s.user }}@{{ s.host }}</span>
-                <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
-              </div>
-              <p v-if="!filteredSessions.length" class="sp-empty">没有匹配的终端</p>
-            </div>
+        <div v-if="tabsOverflow && sessionMenuOpen" class="search-pop session-pop" @click.stop>
+          <div class="sp-input">
+            <input
+              ref="sessionInput"
+              v-model="sessionQuery"
+              placeholder="搜索已收起的终端"
+              @keydown.esc="sessionMenuOpen = false"
+            />
           </div>
-        </template>
+          <div class="sp-list">
+            <div
+              v-for="s in filteredSessions"
+              :key="s.id"
+              class="sp-item sp-session"
+              :class="{ on: page === 'term' && s.id === activeId }"
+              :title="`${s.user}@${s.host}:${s.port}`"
+              @click="pickSession(s.id)"
+            >
+              <span class="dot" :class="s.status" />
+              <span class="sp-name">{{ sessionLabel(s) }}</span>
+              <span class="sp-meta">{{ s.user }}@{{ s.host }}</span>
+              <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
+            </div>
+            <p v-if="!filteredSessions.length" class="sp-empty">
+              {{ sessionQuery.trim() ? "没有匹配的终端" : "没有收起的终端" }}
+            </p>
+          </div>
+        </div>
 
         <!-- 隐藏副本：不参与布局，仅用于测量全部标签的自然宽度 -->
         <div ref="tabsGhostEl" class="tb-tabs tb-tabs-ghost" aria-hidden="true">
@@ -731,9 +774,12 @@ function closeSession(id: string) {
   justify-content: center;
 }
 
-/* 顶栏已打开终端：标签放不下时收成单个按钮 + 数量角标 */
+/* 顶栏已打开终端：能放下的标签平铺，放不下的收进「更多」按钮 + 数量角标 */
 .tb-sessions {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -802,6 +848,12 @@ function closeSession(id: string) {
 .tb-session-btn {
   gap: 7px;
 }
+/* 「更多」按钮：只保留图标 + 收起数量，尽量少占宽度 */
+.tb-more {
+  flex: none;
+  gap: 5px;
+  padding: 0 8px;
+}
 .tb-count {
   display: grid;
   place-items: center;
@@ -817,6 +869,9 @@ function closeSession(id: string) {
 }
 .session-pop {
   width: 320px;
+  /* 收起列表紧贴「更多」按钮右侧对齐，避免向右溢出窗口 */
+  left: auto;
+  right: 0;
 }
 .sp-session {
   cursor: default;
