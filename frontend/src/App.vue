@@ -51,10 +51,20 @@ const TAB_GAP = 4;
 /** 「更多」按钮未渲染时的宽度估算值 */
 const MORE_FALLBACK_WIDTH = 74;
 
-/** 平铺展示的标签 */
-const visibleTabs = computed(() => sessions.value.slice(0, visibleTabCount.value));
-/** 收进「更多」浮层的会话 */
-const hiddenSessions = computed(() => sessions.value.slice(visibleTabCount.value));
+/** 平铺展示的标签：当前打开的会话若被收起，会占用最后一个平铺位，保证始终可见 */
+const visibleTabs = computed(() => {
+  const list = sessions.value;
+  if (!tabsOverflow.value) return list.slice(0, visibleTabCount.value);
+  const shown = list.slice(0, visibleTabCount.value);
+  const active = list.find((s) => s.id === activeId.value);
+  if (!active || shown.some((s) => s.id === active.id)) return shown;
+  return shown.length ? [...shown.slice(0, -1), active] : [active];
+});
+/** 收进「更多」浮层的会话（不含当前打开的会话） */
+const hiddenSessions = computed(() => {
+  const shown = new Set(visibleTabs.value.map((s) => s.id));
+  return sessions.value.filter((s) => !shown.has(s.id));
+});
 
 /** 计算能放下多少个标签，剩余部分收进「更多」按钮 */
 function updateTabsOverflow() {
@@ -79,16 +89,21 @@ function updateTabsOverflow() {
     return;
   }
 
-  // 放不下时逐个累加标签宽度，直到再放一个就会挤掉「更多」按钮
+  // 逐个累加标签宽度；当前会话在收起列表里时，最后一个平铺位留给它
+  const activeIdx = sessions.value.findIndex((s) => s.id === activeId.value);
   const moreWidth = moreBtnEl.value?.offsetWidth ?? MORE_FALLBACK_WIDTH;
-  let used = 0;
+  let prefix = 0;
   let count = 0;
-  for (let i = 0; i < widths.length; i++) {
-    const next = used + widths[i] + (i ? TAB_GAP : 0);
-    if (next + TAB_GAP + moreWidth > available) break;
-    used = next;
-    count += 1;
+  for (let k = 1; k <= widths.length; k++) {
+    // 前 k 个标签的总宽度（当前会话尚未进入前 k 个时，末位换成它的宽度）
+    const total = activeIdx >= k ? prefix + widths[activeIdx] : prefix + widths[k - 1];
+    const used = total + (k - 1) * TAB_GAP + TAB_GAP + moreWidth;
+    if (used > available) break;
+    count = k;
+    prefix += widths[k - 1];
   }
+  // 空间极窄时也至少保留当前打开的会话
+  if (!count && activeIdx >= 0) count = 1;
   tabsOverflow.value = true;
   if (visibleTabCount.value !== count) {
     visibleTabCount.value = count;
@@ -103,6 +118,9 @@ watch(
   () => sessions.value.map((s) => sessionLabel(s)).join("|"),
   () => void nextTick(updateTabsOverflow),
 );
+
+/** 切换当前终端后，需要重新分配平铺位置以保证它始终可见 */
+watch(activeId, () => void nextTick(updateTabsOverflow));
 
 /** 页面切换会增减顶栏按钮，可用宽度随之变化 */
 watch(page, () => void nextTick(updateTabsOverflow));
@@ -141,11 +159,11 @@ watch(sessionMenuOpen, (open) => {
   else sessionQuery.value = "";
 });
 
-/** 收起列表按关键词过滤：备注名、IP、用户名 */
+/** 已打开终端按关键词过滤：备注名、IP、用户名 */
 const filteredSessions = computed(() => {
   const q = sessionQuery.value.trim().toLowerCase();
-  if (!q) return hiddenSessions.value;
-  return hiddenSessions.value.filter((s) =>
+  if (!q) return sessions.value;
+  return sessions.value.filter((s) =>
     [sessionLabel(s), s.host, s.user].some((v) => (v || "").toLowerCase().includes(q)),
   );
 });
@@ -461,7 +479,7 @@ function closeSession(id: string) {
             <input
               ref="sessionInput"
               v-model="sessionQuery"
-              placeholder="搜索已收起的终端"
+              placeholder="搜索已打开的终端"
               @keydown.esc="sessionMenuOpen = false"
             />
           </div>
@@ -471,16 +489,15 @@ function closeSession(id: string) {
               :key="s.id"
               class="sp-item sp-session"
               :class="{ on: page === 'term' && s.id === activeId }"
-              :title="`${s.user}@${s.host}:${s.port}`"
+              :title="sessionLabel(s)"
               @click="pickSession(s.id)"
             >
               <span class="dot" :class="s.status" />
               <span class="sp-name">{{ sessionLabel(s) }}</span>
-              <span class="sp-meta">{{ s.user }}@{{ s.host }}</span>
               <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
             </div>
             <p v-if="!filteredSessions.length" class="sp-empty">
-              {{ sessionQuery.trim() ? "没有匹配的终端" : "没有收起的终端" }}
+              {{ sessionQuery.trim() ? "没有匹配的终端" : "没有已打开的终端" }}
             </p>
           </div>
         </div>
@@ -867,11 +884,15 @@ function closeSession(id: string) {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.session-pop {
-  width: 320px;
-  /* 收起列表紧贴「更多」按钮右侧对齐，避免向右溢出窗口 */
-  left: auto;
-  right: 0;
+/* 「更多」收起列表：弹出在页面正中间 */
+.search-pop.session-pop {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  transform: translate(-50%, -50%);
 }
 .sp-session {
   cursor: default;
