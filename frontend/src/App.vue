@@ -353,8 +353,20 @@ async function submitHost(host: HostConfig) {
   editing.value = null;
 }
 
+/** 待删除的连接档案：非空时展示自定义删除确认弹窗 */
+const pendingDelete = ref<HostConfig | null>(null);
+const confirmMaskEl = ref<HTMLElement>();
+
 async function removeHost(host: HostConfig) {
-  if (!window.confirm(`删除连接档案「${host.name || host.host}」？`)) return;
+  pendingDelete.value = host;
+  await nextTick();
+  confirmMaskEl.value?.focus();
+}
+
+async function confirmDelete() {
+  const host = pendingDelete.value;
+  if (!host) return;
+  pendingDelete.value = null;
   await persistHosts(hosts.value.filter((h) => h.id !== host.id));
 }
 
@@ -712,6 +724,41 @@ function closeSession(id: string) {
       @submit="submitHost"
       @cancel="dialogOpen = false"
     />
+
+    <!-- 删除确认：自定义弹窗，替代浏览器原生 confirm -->
+    <Teleport to="body">
+      <div
+        v-if="pendingDelete"
+        ref="confirmMaskEl"
+        class="confirm-mask"
+        tabindex="-1"
+        @click.self="pendingDelete = null"
+        @keydown.esc="pendingDelete = null"
+      >
+        <div class="confirm-dialog" role="alertdialog" aria-modal="true">
+          <div class="confirm-head">
+            <span class="confirm-icon">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.5a1 1 0 0 0 1 .9h3.9a1 1 0 0 0 1-.9l.6-8.5"
+                />
+              </svg>
+            </span>
+            <div class="confirm-text">
+              <h3>删除连接</h3>
+              <p>
+                确定要删除「<strong>{{ pendingDelete.name || pendingDelete.host }}</strong
+                >」吗？
+              </p>
+            </div>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn" @click="pendingDelete = null">取消</button>
+            <button class="btn danger" @click="confirmDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 主页卡片操作菜单：跟随光标或「更多」按钮，统一弹在 body 上避免被卡片裁剪 -->
     <Teleport to="body">
@@ -1388,6 +1435,108 @@ function closeSession(id: string) {
   height: 1px;
   margin: 4px 6px;
   background: var(--win-stroke);
+}
+
+/* 删除确认弹窗：沿用深色浮层风格，避免浏览器原生 confirm 破坏观感 */
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(2px);
+  outline: none;
+  animation: confirm-fade 0.12s ease-out;
+}
+.confirm-dialog {
+  width: min(400px, 92vw);
+  padding: 20px;
+  border: 1px solid var(--win-stroke-strong);
+  border-radius: 14px;
+  background: var(--win-flyout);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: confirm-pop 0.14s ease-out;
+}
+.confirm-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.confirm-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--win-err);
+}
+.confirm-icon svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.confirm-text {
+  min-width: 0;
+}
+.confirm-text h3 {
+  margin: 1px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--win-text);
+}
+.confirm-text p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--win-text-2);
+  overflow-wrap: anywhere;
+}
+.confirm-text strong {
+  color: var(--win-text);
+  font-weight: 600;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.confirm-actions .btn {
+  height: 32px;
+  padding: 0 18px;
+  font-size: 13px;
+}
+.btn.danger {
+  background: var(--win-close);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+.btn.danger:hover:not(:disabled) {
+  background: #f05256;
+}
+.btn.danger:active:not(:disabled) {
+  background: #cf3b40;
+}
+@keyframes confirm-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes confirm-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
 }
 
 /* 通用按钮 */
