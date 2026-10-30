@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 单个终端面板：xterm.js 实例 + 尺寸同步 + 数据路由。
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { Clipboard } from "@wailsio/runtime";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -75,6 +76,58 @@ function activate() {
   emit("activate", props.session.id);
 }
 
+/** 复制当前选中文本到系统剪贴板 */
+async function copySelection() {
+  const instance = term.value;
+  const text = instance?.getSelection();
+  if (!instance || !text) return;
+  try {
+    await Clipboard.SetText(text);
+    instance.clearSelection();
+  } catch {
+    /* 剪贴板不可用时保持选中状态 */
+  }
+}
+
+/** 把系统剪贴板内容粘贴到终端当前光标处 */
+async function pasteClipboard() {
+  const instance = term.value;
+  if (!instance) return;
+  try {
+    const text = await Clipboard.Text();
+    if (text) instance.paste(text);
+  } catch {
+    /* 剪贴板不可用时忽略 */
+  }
+  instance.focus();
+}
+
+/** 右键粘贴：有选中文本时优先粘贴选中内容（PuTTY / Xshell 习惯），否则粘贴系统剪贴板 */
+async function onContextMenu(e: MouseEvent) {
+  e.preventDefault();
+  // 阻止 xterm 内置的右键处理，避免它改写隐藏 textarea 的内容
+  e.stopPropagation();
+  const instance = term.value;
+  if (!instance) return;
+  const selection = instance.getSelection();
+  if (selection) {
+    try {
+      await Clipboard.SetText(selection);
+    } catch {
+      /* 写剪贴板失败时仍然粘贴到终端 */
+    }
+    instance.paste(selection);
+  } else {
+    try {
+      const text = await Clipboard.Text();
+      if (text) instance.paste(text);
+    } catch {
+      /* 剪贴板不可用时忽略 */
+    }
+  }
+  instance.focus();
+}
+
 onMounted(() => {
   const instance = new Terminal({
     cursorBlink: true,
@@ -119,6 +172,21 @@ onMounted(() => {
 
   // 用户按键 -> 后端（同步输入时广播到全部会话）
   instance.onData((data) => sendKeys(props.session.id, data));
+
+  // Ctrl+Shift+C 复制选中内容，Ctrl+V 粘贴剪贴板内容
+  instance.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey)) return true;
+    const key = e.key.toLowerCase();
+    if (e.shiftKey && key === "c") {
+      void copySelection();
+      return false;
+    }
+    if (!e.shiftKey && key === "v") {
+      void pasteClipboard();
+      return false;
+    }
+    return true;
+  });
 
   // 终端尺寸变化 -> 通知远端 PTY
   instance.onResize(({ cols, rows }) => resizeSession(props.session.id, cols, rows));
@@ -169,7 +237,7 @@ function focus() {
     :style="{ display: visible ? 'flex' : 'none' }"
     @mousedown="activate"
   >
-    <div ref="paneEl" class="pane-body" @click="activate">
+    <div ref="paneEl" class="pane-body" @click="activate" @contextmenu.capture="onContextMenu">
       <div ref="bodyEl" class="term" />
       <div v-if="!connected" class="overlay" @click.stop>
         <svg v-if="connecting" class="spinner" viewBox="0 0 48 48" aria-hidden="true">
