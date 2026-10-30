@@ -178,8 +178,9 @@ function onDrop() {
     return;
   }
   const paths = [...src.paths];
-  endSftpDrag();
+  // 先通知父组件，让它读取当前拖拽来源后再清理
   emit("drop-files", paths, cwd.value);
+  endSftpDrag();
 }
 
 onMounted(() => {

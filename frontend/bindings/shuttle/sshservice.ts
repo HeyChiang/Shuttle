@@ -61,6 +61,13 @@ export function Exec(ids: string[] | null, command: string): $CancellablePromise
 }
 
 /**
+ * ListLocal lists one local directory for the dual-pane SFTP view.
+ */
+export function ListLocal(dir: string): $CancellablePromise<sshcore$0.RemoteFile[] | null> {
+    return $Call.ByID(33829798, dir);
+}
+
+/**
  * ListRemote lists a remote directory.
  */
 export function ListRemote(id: string, dir: string): $CancellablePromise<sshcore$0.RemoteFile[] | null> {
@@ -72,6 +79,13 @@ export function ListRemote(id: string, dir: string): $CancellablePromise<sshcore
  */
 export function LoadHosts(): $CancellablePromise<sshcore$0.HostConfig[] | null> {
     return $Call.ByID(2924831126);
+}
+
+/**
+ * LocalHome returns the current user's home directory.
+ */
+export function LocalHome(): $CancellablePromise<string> {
+    return $Call.ByID(3898699921);
 }
 
 /**

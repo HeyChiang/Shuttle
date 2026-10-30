@@ -202,6 +202,18 @@ func (s *SSHService) SftpTransfer(srcToken, dstToken string, remotePaths []strin
 	return s.sftp.Transfer(srcToken, dstToken, remotePaths, dstDir)
 }
 
+// --- local files -----------------------------------------------------------
+
+// LocalHome returns the current user's home directory.
+func (s *SSHService) LocalHome() (string, error) {
+	return sshcore.LocalHome()
+}
+
+// ListLocal lists one local directory for the dual-pane SFTP view.
+func (s *SSHService) ListLocal(dir string) ([]sshcore.RemoteFile, error) {
+	return sshcore.LocalList(dir)
+}
+
 // --- native dialogs --------------------------------------------------------
 
 func openFileDialog() *application.OpenFileDialogStruct {

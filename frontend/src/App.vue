@@ -681,11 +681,7 @@ function closeSession(id: string) {
         </div>
       </section>
 
-      <SftpView
-        v-if="page === 'sftp'"
-        :hosts="hosts"
-        :default-host-id="filteredHosts[0]?.id"
-      />
+      <SftpView v-if="page === 'sftp'" :hosts="hosts" />
     </main>
 
     <HostDialog
