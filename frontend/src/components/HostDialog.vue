@@ -73,7 +73,7 @@ function submit() {
   <div class="mask" @click.self="emit('cancel')">
     <div class="dialog">
       <header>
-        <h3>{{ host ? "编辑连接" : "新建连接" }}</h3>
+        <h3>{{ host ? "编辑主机" : "新增主机" }}</h3>
         <button class="close" title="关闭" @click="emit('cancel')">
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
             <path

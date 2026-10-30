@@ -500,7 +500,7 @@ function closeSession(id: string) {
             <input
               ref="searchInput"
               v-model="query"
-              placeholder="搜索服务器"
+              placeholder="搜索主机"
               @keydown.esc="searchOpen = false"
               @keydown.enter="openFirstMatch"
             />
@@ -546,8 +546,8 @@ function closeSession(id: string) {
 
     <!-- 第二行：搜索 + 新增（仅主页） -->
     <div v-if="page === 'home'" class="home-bar">
-      <input v-model="query" placeholder="搜索服务器：IP、备注名或分组" />
-      <button class="btn primary new-btn" @click="openNew">新增服务器</button>
+      <input v-model="query" placeholder="搜索主机：IP、备注名或分组" />
+      <button class="btn primary new-btn" @click="openNew">新增主机</button>
     </div>
 
     <!-- 第三行：服务器列表 / 终端 / SFTP -->
@@ -608,9 +608,9 @@ function closeSession(id: string) {
         </div>
 
         <div v-if="!hosts.length" class="empty-state">
-          <h3>还没有保存的服务器</h3>
-          <p>点击上方「新增服务器」添加第一条 SSH 连接信息。</p>
-          <button class="btn primary" @click="openNew">新增服务器</button>
+          <h3>还没有保存主机连接</h3>
+          <p>点击「新增主机」添加第一条 SSH 连接信息。</p>
+          <button class="btn primary" @click="openNew">新增主机</button>
         </div>
         <div v-else-if="!homeSections.length" class="empty-state">
           <h3>没有匹配的服务器</h3>
