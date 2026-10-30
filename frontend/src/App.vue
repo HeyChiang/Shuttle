@@ -125,9 +125,6 @@ watch(activeId, () => void nextTick(updateTabsOverflow));
 /** 页面切换会增减顶栏按钮，可用宽度随之变化 */
 watch(page, () => void nextTick(updateTabsOverflow));
 
-/** 主页展示模式：分组 / 最近打开 */
-const homeMode = ref<"group" | "recent">("group");
-
 /** 点击页面空白处收起浮层 */
 function closePopups() {
   hostMenu.value = null;
@@ -174,14 +171,9 @@ function pickHost(h: HostConfig) {
   connectHost(h);
 }
 
-/** 顶栏搜索框列表：无关键词时展示最近打开，输入后搜索全部服务器 */
-const paletteHosts = computed(() =>
-  query.value.trim() ? filteredHosts.value : recentHosts.value,
-);
-
 /** 顶栏搜索框回车：打开列表第一条 */
 function openFirstMatch() {
-  const first = paletteHosts.value[0];
+  const first = filteredHosts.value[0];
   if (first) pickHost(first);
 }
 
@@ -229,69 +221,8 @@ const groupedHosts = computed(() => {
   return [...groups].map(([name, list]) => ({ name, hosts: list }));
 });
 
-/* ------------------------------------------------------- 最近打开的服务器 */
-
-const RECENT_KEY = "shuttle.recentHosts";
-type RecentEntry = { id: string; at: number };
-
-function readRecent(): RecentEntry[] {
-  try {
-    const raw = localStorage.getItem(RECENT_KEY);
-    const list = raw ? (JSON.parse(raw) as RecentEntry[]) : [];
-    return list.filter((e) => e && typeof e.id === "string" && typeof e.at === "number");
-  } catch {
-    return [];
-  }
-}
-
-const recentEntries = ref<RecentEntry[]>(readRecent());
-
-/** 记录一次打开；同一服务器只保留最新一条 */
-function markRecent(id: string) {
-  if (!id) return;
-  recentEntries.value = [
-    { id, at: Date.now() },
-    ...recentEntries.value.filter((e) => e.id !== id),
-  ].slice(0, 30);
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recentEntries.value));
-  } catch {
-    /* 忽略存储失败 */
-  }
-}
-
-/** 最近打开且仍存在（并符合当前搜索）的服务器，按时间倒序 */
-const recentHosts = computed(() => {
-  const q = query.value.trim().toLowerCase();
-  return recentEntries.value
-    .map((e) => hosts.value.find((h) => h.id === e.id))
-    .filter((h): h is HostConfig => !!h)
-    .filter(
-      (h) => !q || [h.host, h.name, h.group].some((v) => (v || "").toLowerCase().includes(q)),
-    );
-});
-
-/** 主页列表数据：分组模式按分组聚合，最近模式单列一栏 */
-const homeSections = computed(() => {
-  if (homeMode.value === "recent") {
-    return recentHosts.value.length
-      ? [{ name: "最近打开", hosts: recentHosts.value, recent: true }]
-      : [];
-  }
-  return groupedHosts.value
-    .filter((g) => g.hosts.length)
-    .map((g) => ({ ...g, recent: false }));
-});
-
-function recentLabel(id: string): string {
-  const at = recentEntries.value.find((e) => e.id === id)?.at ?? 0;
-  if (!at) return "";
-  const diff = Date.now() - at;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return new Date(at).toLocaleDateString();
-}
+/** 主页列表数据：按分组聚合 */
+const homeSections = computed(() => groupedHosts.value.filter((g) => g.hosts.length));
 
 async function refreshMax() {
   try {
@@ -381,7 +312,6 @@ function duplicateHost(host: HostConfig) {
 
 function connectHost(host: HostConfig) {
   page.value = "term";
-  markRecent(host.id);
   void connect(host);
 }
 
@@ -575,10 +505,10 @@ function closeSession(id: string) {
               @keydown.enter="openFirstMatch"
             />
           </div>
-          <!-- 第一行搜索框，下面默认展示最近打开的服务器，输入后搜索全部 -->
+          <!-- 输入关键词搜索服务器，未输入时展示全部 -->
           <div class="sp-list">
             <button
-              v-for="h in paletteHosts"
+              v-for="h in filteredHosts"
               :key="h.id"
               class="sp-item"
               @click="pickHost(h)"
@@ -586,8 +516,8 @@ function closeSession(id: string) {
               <span class="sp-name">{{ h.name || h.host }}</span>
               <span class="sp-meta">{{ h.user }}@{{ h.host }}:{{ h.port }}</span>
             </button>
-            <p v-if="!paletteHosts.length" class="sp-empty">
-              {{ query.trim() ? "没有匹配的服务器" : "还没有最近打开的服务器" }}
+            <p v-if="!filteredHosts.length" class="sp-empty">
+              {{ query.trim() ? "没有匹配的服务器" : "还没有保存的服务器" }}
             </p>
           </div>
         </div>
@@ -625,21 +555,13 @@ function closeSession(id: string) {
       <section v-show="page === 'home'" class="list-view">
         <div class="list-head">
           <div class="lh-text">
-            <h2>{{ homeMode === "group" ? "服务器" : "最近打开" }}</h2>
-          </div>
-          <div class="seg">
-            <button :class="{ on: homeMode === 'group' }" @click="homeMode = 'group'">
-              分组
-            </button>
-            <button :class="{ on: homeMode === 'recent' }" @click="homeMode = 'recent'">
-              最近打开
-            </button>
+            <h2>主机</h2>
           </div>
         </div>
 
         <div v-if="homeSections.length" class="cards">
           <section v-for="g in homeSections" :key="g.name" class="group">
-            <header v-if="!g.recent" class="group-head">
+            <header class="group-head">
               <span class="group-name">{{ g.name }}</span>
               <span class="group-count">{{ g.hosts.length }} 台服务器</span>
             </header>
@@ -679,9 +601,6 @@ function closeSession(id: string) {
                 <div class="tags">
                   <span class="tag">{{ authLabel(h) }}</span>
                   <span class="tag">{{ h.encoding }}</span>
-                  <span v-if="g.recent && recentLabel(h.id)" class="tag">
-                    {{ recentLabel(h.id) }}
-                  </span>
                 </div>
               </article>
             </div>
@@ -692,10 +611,6 @@ function closeSession(id: string) {
           <h3>还没有保存的服务器</h3>
           <p>点击上方「新增服务器」添加第一条 SSH 连接信息。</p>
           <button class="btn primary" @click="openNew">新增服务器</button>
-        </div>
-        <div v-else-if="!homeSections.length && homeMode === 'recent' && !query.trim()" class="empty-state">
-          <h3>还没有最近打开的服务器</h3>
-          <p>连接任意服务器后，会按时间顺序记录在这里。</p>
         </div>
         <div v-else-if="!homeSections.length" class="empty-state">
           <h3>没有匹配的服务器</h3>
@@ -1212,33 +1127,6 @@ function closeSession(id: string) {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-}
-/* 分组 / 最近打开 切换 */
-.seg {
-  display: flex;
-  gap: 2px;
-  flex: none;
-  padding: 2px;
-  border: 1px solid var(--win-stroke);
-  border-radius: 9px;
-  background: var(--win-fill);
-}
-.seg button {
-  height: 24px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--win-text-2);
-  font-size: 12px;
-  cursor: default;
-}
-.seg button:hover {
-  color: var(--win-text);
-}
-.seg button.on {
-  background: var(--win-fill-press);
-  color: var(--win-text);
 }
 .cards {
   flex: 1;
