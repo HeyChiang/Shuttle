@@ -61,6 +61,10 @@ func LocalList(dir string) ([]RemoteFile, error) {
 		if err != nil {
 			continue
 		}
+		// 与资源管理器默认行为一致：不展示隐藏/系统文件
+		if isHiddenFile(info) {
+			continue
+		}
 		item := RemoteFile{
 			Name:      entry.Name(),
 			Path:      full,

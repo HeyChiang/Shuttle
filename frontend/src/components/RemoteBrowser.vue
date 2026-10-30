@@ -243,7 +243,10 @@ watch(
             <path d="M4.2 2.6h4.4l3.2 3.2v7.6H4.2z" />
             <path d="M8.6 2.6v3.2h3.2" />
           </svg>
-          <span class="nm">{{ entry.name }}</span>
+          <span class="meta">
+            <span class="nm">{{ entry.name }}</span>
+            <span v-if="entry.mode" class="perm">{{ entry.mode }}</span>
+          </span>
         </span>
         <span class="c-size">{{ entry.isDir ? "-" : human(entry.size) }}</span>
         <span class="c-time">{{ stamp(entry.modTime) }}</span>
@@ -348,8 +351,8 @@ watch(
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  height: 28px;
-  font-size: 12px;
+  height: 46px;
+  font-size: 13px;
   color: var(--win-text-2);
   border-bottom: 1px solid var(--win-stroke);
   cursor: default;
@@ -370,15 +373,15 @@ watch(
 .c-name {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
   min-width: 0;
 }
 .ico {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   fill: none;
-  stroke-width: 1.2;
+  stroke-width: 1.1;
   stroke-linejoin: round;
 }
 .ico.dir {
@@ -388,7 +391,22 @@ watch(
 .ico.file {
   stroke: var(--win-text-2);
 }
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.25;
+}
 .nm {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.perm {
+  color: var(--win-text-3);
+  font-family: var(--win-mono);
+  font-size: 10.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

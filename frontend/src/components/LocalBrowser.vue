@@ -397,8 +397,8 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  height: 28px;
-  font-size: 12px;
+  height: 46px;
+  font-size: 13px;
   color: var(--win-text-2);
   border-bottom: 1px solid var(--win-stroke);
   cursor: default;
@@ -422,15 +422,15 @@ onMounted(() => {
 .c-name {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
   min-width: 0;
 }
 .ico {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   fill: none;
-  stroke-width: 1.2;
+  stroke-width: 1.1;
   stroke-linejoin: round;
 }
 .ico.dir {

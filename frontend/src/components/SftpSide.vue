@@ -240,9 +240,7 @@ onBeforeUnmount(() => {
           <span class="host-name">{{ hostLabel }}</span>
           <span class="host-change">更换</span>
         </button>
-        <span v-else class="host-hint">选择服务器</span>
       </template>
-      <span v-else class="host-hint">本机文件</span>
 
       <span class="side-hint">{{ busy ? "传输中…" : "" }}</span>
     </header>
@@ -369,13 +367,6 @@ onBeforeUnmount(() => {
   flex: none;
   color: var(--win-text-3);
   font-size: 11px;
-}
-.host-hint {
-  color: var(--win-text-3);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .side-hint {
   margin-left: auto;
