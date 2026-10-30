@@ -125,18 +125,12 @@ watch(activeId, () => void nextTick(updateTabsOverflow));
 /** 页面切换会增减顶栏按钮，可用宽度随之变化 */
 watch(page, () => void nextTick(updateTabsOverflow));
 
-/** 当前展开更多菜单的卡片 id */
-const menuFor = ref<string | null>(null);
 /** 主页展示模式：分组 / 最近打开 */
 const homeMode = ref<"group" | "recent">("group");
 
-function toggleMenu(id: string) {
-  menuFor.value = menuFor.value === id ? null : id;
-}
-
 /** 点击页面空白处收起浮层 */
 function closePopups() {
-  menuFor.value = null;
+  hostMenu.value = null;
   sessionMenuOpen.value = false;
   if (!searchOpen.value) return;
   searchOpen.value = false;
@@ -194,11 +188,6 @@ function openFirstMatch() {
 watch(searchOpen, (open) => {
   if (open) void nextTick(() => searchInput.value?.focus());
 });
-
-function act(fn: () => void) {
-  menuFor.value = null;
-  fn();
-}
 
 /** 依据名称生成稳定的头像底色 */
 const AVATAR_COLORS = ["#3ddc84", "#5aa9ff", "#c678dd", "#ffb454", "#56d4dd", "#ff7b8a"];
@@ -384,6 +373,45 @@ function connectHost(host: HostConfig) {
   void connect(host);
 }
 
+/** 主页卡片操作菜单：当前主机 + 相对视口的坐标 */
+const hostMenu = ref<{ host: HostConfig; left: number; top: number } | null>(null);
+const hostMenuEl = ref<HTMLElement>();
+/** 菜单宽度，用于「更多」按钮右对齐与首次定位 */
+const HOST_MENU_WIDTH = 178;
+
+/** 显示菜单并贴边修正坐标，避免超出窗口 */
+async function showHostMenu(host: HostConfig, left: number, top: number) {
+  hostMenu.value = { host, left, top };
+  await nextTick();
+  const el = hostMenuEl.value;
+  if (!el || !hostMenu.value) return;
+  const rect = el.getBoundingClientRect();
+  hostMenu.value.left = Math.max(8, Math.min(left, window.innerWidth - rect.width - 8));
+  hostMenu.value.top = Math.max(8, Math.min(top, window.innerHeight - rect.height - 8));
+}
+
+/** 右键卡片：菜单跟随光标 */
+function openHostMenuAtCursor(host: HostConfig, e: MouseEvent) {
+  void showHostMenu(host, e.clientX + 2, e.clientY + 2);
+}
+
+/** 点击「更多」按钮：菜单右对齐展开在按钮下方 */
+function openHostMenuFromButton(host: HostConfig, e: MouseEvent) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  void showHostMenu(host, r.right - HOST_MENU_WIDTH, r.bottom + 6);
+}
+
+/** 执行菜单动作并收起菜单 */
+function runHostAction(action: "connect" | "edit" | "duplicate" | "delete") {
+  const host = hostMenu.value?.host;
+  hostMenu.value = null;
+  if (!host) return;
+  if (action === "connect") connectHost(host);
+  else if (action === "edit") openEdit(host);
+  else if (action === "duplicate") duplicateHost(host);
+  else void removeHost(host);
+}
+
 /** 点击顶部会话标签：切换焦点并回到终端视图 */
 function openSession(id: string) {
   activeId.value = id;
@@ -399,7 +427,7 @@ function closeSession(id: string) {
 </script>
 
 <template>
-  <div class="app" @contextmenu.prevent @click="closePopups">
+  <div class="app" @contextmenu.prevent="closePopups" @click="closePopups">
     <!-- 第一行：品牌 + SFTP + 窗口控制 -->
     <header ref="titlebarEl" class="titlebar">
       <div class="tb-brand">
@@ -610,6 +638,7 @@ function closeSession(id: string) {
                 :key="h.id"
                 class="card"
                 @dblclick="connectHost(h)"
+                @contextmenu.prevent.stop="openHostMenuAtCursor(h, $event)"
               >
                 <div class="card-top">
                   <span class="avatar" :style="{ background: avatarColor(h.name || h.host) }">
@@ -620,11 +649,11 @@ function closeSession(id: string) {
                     <small>{{ h.user }}@{{ h.host }}:{{ h.port }}</small>
                   </div>
 
-                  <div class="more" :class="{ open: menuFor === h.id }">
+                  <div class="more">
                     <button
                       class="more-btn"
                       title="更多操作"
-                      @click.stop="toggleMenu(h.id)"
+                      @click.stop="openHostMenuFromButton(h, $event)"
                     >
                       <svg viewBox="0 0 16 16">
                         <circle cx="3.4" cy="8" r="1.3" />
@@ -632,13 +661,6 @@ function closeSession(id: string) {
                         <circle cx="12.6" cy="8" r="1.3" />
                       </svg>
                     </button>
-                    <div v-if="menuFor === h.id" class="menu" @click.stop>
-                      <button @click="act(() => connectHost(h))">连接</button>
-                      <button @click="act(() => openEdit(h))">编辑</button>
-                      <button @click="act(() => duplicateHost(h))">复制</button>
-                      <span class="sep" />
-                      <button class="danger" @click="act(() => void removeHost(h))">删除</button>
-                    </div>
                   </div>
                 </div>
 
@@ -690,6 +712,45 @@ function closeSession(id: string) {
       @submit="submitHost"
       @cancel="dialogOpen = false"
     />
+
+    <!-- 主页卡片操作菜单：跟随光标或「更多」按钮，统一弹在 body 上避免被卡片裁剪 -->
+    <Teleport to="body">
+      <div
+        v-if="hostMenu"
+        ref="hostMenuEl"
+        class="host-menu"
+        :style="{ left: `${hostMenu.left}px`, top: `${hostMenu.top}px` }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button class="host-menu-item" @click="runHostAction('connect')">
+          <svg viewBox="0 0 16 16">
+            <path d="M5.5 2v3.2M10.5 2v3.2M3.6 5.2h8.8v1.9a4.4 4.4 0 0 1-8.8 0V5.2ZM8 11.5V14" />
+          </svg>
+          连接
+        </button>
+        <button class="host-menu-item" @click="runHostAction('edit')">
+          <svg viewBox="0 0 16 16">
+            <path d="M11.3 2.7l2 2-7.4 7.4-2.7.7.7-2.7 7.4-7.4Z" />
+          </svg>
+          编辑
+        </button>
+        <button class="host-menu-item" @click="runHostAction('duplicate')">
+          <svg viewBox="0 0 16 16">
+            <rect x="5.6" y="5.6" width="8" height="8" rx="1.6" />
+            <path d="M10.4 3.2H4.2a1.6 1.6 0 0 0-1.6 1.6v6.2" />
+          </svg>
+          复制
+        </button>
+        <div class="host-menu-sep" />
+        <button class="host-menu-item danger" @click="runHostAction('delete')">
+          <svg viewBox="0 0 16 16">
+            <path d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.5a1 1 0 0 0 1 .9h3.9a1 1 0 0 0 1-.9l.6-8.5" />
+          </svg>
+          删除
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1232,7 +1293,6 @@ function closeSession(id: string) {
   font-size: 10.5px;
 }
 .more {
-  position: relative;
   flex: none;
 }
 .more-btn {
@@ -1249,12 +1309,10 @@ function closeSession(id: string) {
   transition: opacity 0.12s ease, background 0.12s ease;
   cursor: default;
 }
-.card:hover .more-btn,
-.more.open .more-btn {
+.card:hover .more-btn {
   opacity: 1;
 }
-.more-btn:hover,
-.more.open .more-btn {
+.more-btn:hover {
   background: var(--win-fill-hover);
   border-color: var(--win-stroke);
   color: var(--win-text);
@@ -1264,37 +1322,69 @@ function closeSession(id: string) {
   height: 15px;
   fill: currentColor;
 }
-.menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 10;
-  min-width: 128px;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
+
+/* 卡片操作菜单：右键与「更多」按钮共用，跟随界面深色风格 */
+.host-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 178px;
+  padding: 5px;
   border: 1px solid var(--win-stroke-strong);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--win-flyout);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: host-menu-in 0.11s ease-out;
 }
-.menu button {
-  padding: 7px 10px;
+@keyframes host-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+}
+.host-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--win-text);
-  font-size: 12px;
+  font-size: 12.5px;
   text-align: left;
   cursor: default;
+  transition: background 0.1s ease, color 0.1s ease;
 }
-.menu button:hover {
+.host-menu-item svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--win-text-3);
+  transition: color 0.1s ease;
+}
+.host-menu-item:hover {
   background: var(--win-fill-hover);
 }
-.menu button.danger {
+.host-menu-item:hover svg {
+  color: var(--win-text-2);
+}
+.host-menu-item.danger {
   color: var(--win-err);
 }
-.menu .sep {
+.host-menu-item.danger svg {
+  color: var(--win-err);
+  opacity: 0.8;
+}
+.host-menu-item.danger:hover {
+  background: rgba(255, 107, 107, 0.1);
+}
+.host-menu-sep {
   height: 1px;
   margin: 4px 6px;
   background: var(--win-stroke);
