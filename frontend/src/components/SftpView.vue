@@ -18,15 +18,6 @@ const leftHost = ref("");
 const rightKind = ref<Kind>("remote");
 const rightHost = ref("");
 
-function swap() {
-  const kind = leftKind.value;
-  const host = leftHost.value;
-  leftKind.value = rightKind.value;
-  leftHost.value = rightHost.value;
-  rightKind.value = kind;
-  rightHost.value = host;
-}
-
 function human(size: number): string {
   if (!size) return "0 B";
   if (size < 1024) return `${size} B`;
@@ -55,11 +46,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="sftp-view">
-    <header class="sf-bar">
-      <span class="hint">把文件拖到另一侧面板即可传输</span>
-      <button class="swap" title="交换左右两侧" @click="swap">⇄ 左右互换</button>
-    </header>
-
     <div class="sf-panes">
       <SftpSide
         side="L"
@@ -78,7 +64,7 @@ onBeforeUnmount(() => {
     <div v-if="tasks.length" class="progress">
       <div
         v-for="t in tasks"
-        :key="t.sessionId + t.name + t.transferred + t.done"
+        :key="t.sessionId + t.direction + t.name"
         class="task"
       >
         <span class="tnm" :title="t.name">{{ t.name }}</span>
@@ -107,33 +93,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 10px;
   padding: 12px 16px 14px;
-}
-.sf-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: none;
-}
-.hint {
-  color: var(--win-text-3);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-.swap {
-  margin-left: auto;
-  flex: none;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--win-stroke);
-  background: var(--win-fill);
-  color: var(--win-text-2);
-  font-size: 12px;
-  cursor: default;
-}
-.swap:hover {
-  background: var(--win-fill-hover);
-  color: var(--win-text);
 }
 .sf-panes {
   flex: 1;

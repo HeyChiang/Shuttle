@@ -20,7 +20,7 @@ const emit = defineEmits<{
 const cwd = ref("");
 const pathInput = ref("");
 const entries = ref<RemoteFile[]>([]);
-const picked = ref<string[]>([]);
+const drives = ref<string[]>([]);
 const busy = ref(false);
 const error = ref("");
 
@@ -70,7 +70,6 @@ async function open(dir: string) {
     entries.value = list;
     cwd.value = dir;
     pathInput.value = dir;
-    picked.value = [];
     emit("update:cwd", dir);
   } catch (e) {
     error.value = `读取目录失败：${String(e)}`;
@@ -88,27 +87,36 @@ async function goHome() {
   }
 }
 
+/** 当前路径所在的磁盘根，如 C:\ 、D:\ ；Unix 下为 / */
+const currentDrive = computed(() => {
+  const m = /^[A-Za-z]:/.exec(cwd.value);
+  if (m) return `${m[0].toUpperCase()}\\`;
+  return cwd.value.startsWith("/") ? "/" : "";
+});
+
+function driveLabel(d: string): string {
+  return d.replace(/[\\/]+$/, "");
+}
+
+async function loadDrives() {
+  try {
+    drives.value = (await SSH.LocalDrives()) ?? [];
+  } catch {
+    /* 无法枚举磁盘时仅保留路径输入 */
+  }
+}
+
+function onDriveChange(ev: Event) {
+  const dir = (ev.target as HTMLSelectElement).value;
+  if (dir) void open(dir);
+}
+
 function goParent() {
   void open(parentOf(cwd.value));
 }
 
 function refresh() {
   void open(cwd.value);
-}
-
-function toggle(entry: RemoteFile) {
-  if (entry.isDir) return;
-  const i = picked.value.indexOf(entry.path);
-  if (i >= 0) picked.value.splice(i, 1);
-  else picked.value.push(entry.path);
-}
-
-function onRowClick(entry: RemoteFile) {
-  if (!entry.isDir) toggle(entry);
-}
-
-function isPicked(entry: RemoteFile) {
-  return picked.value.includes(entry.path);
 }
 
 // ------------------------------------------------------------- 拖拽传输
@@ -123,8 +131,7 @@ function onDragStart(entry: RemoteFile, ev: DragEvent) {
     ev.preventDefault();
     return;
   }
-  const paths =
-    isPicked(entry) && picked.value.length ? [...picked.value] : [entry.path];
+  const paths = [entry.path];
   beginSftpDrag({ kind: "local", paths });
   if (ev.dataTransfer) {
     ev.dataTransfer.effectAllowed = "copy";
@@ -174,6 +181,7 @@ watch(
 );
 
 onMounted(() => {
+  void loadDrives();
   if (props.initialDir) void open(props.initialDir);
   else void goHome();
 });
@@ -204,6 +212,11 @@ onMounted(() => {
           <path d="M13.4 2.6v3h-3" />
         </svg>
       </button>
+      <div v-if="drives.length > 1" class="drive-pick">
+        <select :value="currentDrive" :disabled="busy" title="切换磁盘" @change="onDriveChange">
+          <option v-for="d in drives" :key="d" :value="d">{{ driveLabel(d) }}</option>
+        </select>
+      </div>
       <input
         v-model="pathInput"
         class="path"
@@ -217,7 +230,6 @@ onMounted(() => {
 
     <div v-else class="list">
       <div class="row head">
-        <span class="c-check" />
         <span class="c-name">名称</span>
         <span class="c-size">大小</span>
         <span class="c-time">修改时间</span>
@@ -227,21 +239,12 @@ onMounted(() => {
         v-for="entry in entries"
         :key="entry.path"
         class="row"
-        :class="{ picked: isPicked(entry), draggable: !entry.isDir }"
+        :class="{ draggable: !entry.isDir }"
         :draggable="!entry.isDir"
-        @click="onRowClick(entry)"
         @dblclick="entry.isDir && open(entry.path)"
         @dragstart="onDragStart(entry, $event)"
         @dragend="endSftpDrag"
       >
-        <span class="c-check">
-          <input
-            v-if="!entry.isDir"
-            type="checkbox"
-            :checked="isPicked(entry)"
-            @click.stop="toggle(entry)"
-          />
-        </span>
         <span class="c-name" :title="entry.isSymlink ? '→ ' + entry.linkTarget : entry.path">
           <svg v-if="entry.isDir" class="ico dir" viewBox="0 0 16 16">
             <path
@@ -316,6 +319,44 @@ onMounted(() => {
   color: var(--win-text-disabled);
   cursor: not-allowed;
 }
+.drive-pick {
+  position: relative;
+  flex: none;
+}
+.drive-pick select {
+  appearance: none;
+  height: 30px;
+  padding: 0 24px 0 10px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 8px;
+  background: var(--win-fill);
+  color: var(--win-text-2);
+  font-size: 12px;
+  font-family: var(--win-mono);
+  cursor: default;
+  outline: none;
+}
+.drive-pick select:hover:not(:disabled) {
+  background: var(--win-fill-hover);
+  color: var(--win-text);
+}
+.drive-pick select:disabled {
+  color: var(--win-text-disabled);
+  cursor: not-allowed;
+}
+.drive-pick::after {
+  content: "";
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -4px;
+  border-right: 1.4px solid var(--win-text-3);
+  border-bottom: 1.4px solid var(--win-text-3);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
 .path {
   flex: 1;
   min-width: 0;
@@ -352,7 +393,7 @@ onMounted(() => {
 }
 .row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 90px 130px;
+  grid-template-columns: minmax(0, 1fr) 90px 130px;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
@@ -364,9 +405,6 @@ onMounted(() => {
 }
 .row:not(.head):hover {
   background: var(--win-fill-hover);
-}
-.row.picked {
-  background: var(--win-accent-soft);
 }
 .row.draggable:active {
   cursor: grabbing;
@@ -380,14 +418,6 @@ onMounted(() => {
   color: var(--win-text-3);
   font-size: 11px;
   border-bottom: 1px solid var(--win-stroke-strong);
-}
-.c-check {
-  display: flex;
-  align-items: center;
-}
-.c-check input {
-  accent-color: var(--win-accent);
-  cursor: default;
 }
 .c-name {
   display: flex;

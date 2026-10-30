@@ -7,27 +7,22 @@ import { beginSftpDrag, endSftpDrag, sftpDrag } from "../sftpDrag";
 
 const props = defineProps<{
   token: string;
-  /** files：多选文件；dir：单击进入目录；none：仅浏览 */
-  select?: "none" | "files" | "dir";
   /** 首次加载后进入的目录，缺省为登录家目录 */
   initialDir?: string;
 }>();
 
 const emit = defineEmits<{
   (e: "update:cwd", v: string): void;
-  (e: "update:picked", v: string[]): void;
   (e: "drop-files", paths: string[], dir: string): void;
 }>();
 
 const cwd = ref("");
 const pathInput = ref("");
 const entries = ref<RemoteFile[]>([]);
-const picked = ref<string[]>([]);
 const busy = ref(false);
 const error = ref("");
 
 const ready = computed(() => !!props.token);
-const selectMode = computed(() => props.select ?? "none");
 
 function human(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -71,9 +66,7 @@ async function open(dir: string) {
     entries.value = list;
     cwd.value = dir;
     pathInput.value = dir;
-    picked.value = [];
     emit("update:cwd", dir);
-    emit("update:picked", []);
   } catch (e) {
     error.value = `读取目录失败：${String(e)}`;
   } finally {
@@ -99,28 +92,8 @@ function refresh() {
   void open(cwd.value || "/");
 }
 
-function toggle(entry: RemoteFile) {
-  if (entry.isDir) return;
-  const i = picked.value.indexOf(entry.path);
-  if (i >= 0) picked.value.splice(i, 1);
-  else picked.value.push(entry.path);
-  emit("update:picked", [...picked.value]);
-}
-
-function onRowClick(entry: RemoteFile) {
-  if (entry.isDir) {
-    if (selectMode.value !== "files") void open(entry.path);
-    return;
-  }
-  if (selectMode.value === "files") toggle(entry);
-}
-
 function onRowDblClick(entry: RemoteFile) {
   if (entry.isDir) void open(entry.path);
-}
-
-function isPicked(entry: RemoteFile) {
-  return picked.value.includes(entry.path);
 }
 
 // ------------------------------------------------------------- 拖拽传输
@@ -139,9 +112,7 @@ function onDragStart(entry: RemoteFile, ev: DragEvent) {
     ev.preventDefault();
     return;
   }
-  // 拖动已勾选的文件时，一次带走全部勾选项
-  const paths =
-    isPicked(entry) && picked.value.length ? [...picked.value] : [entry.path];
+  const paths = [entry.path];
   beginSftpDrag({ kind: "remote", token: props.token, paths });
   if (ev.dataTransfer) {
     ev.dataTransfer.effectAllowed = "copy";
@@ -200,7 +171,6 @@ watch(
   () => props.token,
   () => {
     entries.value = [];
-    picked.value = [];
     cwd.value = "";
     pathInput.value = "";
     error.value = "";
@@ -248,7 +218,6 @@ watch(
 
     <div v-else class="list">
       <div class="row head">
-        <span v-if="selectMode === 'files'" class="c-check" />
         <span class="c-name">名称</span>
         <span class="c-size">大小</span>
         <span class="c-time">修改时间</span>
@@ -258,21 +227,12 @@ watch(
         v-for="entry in entries"
         :key="entry.path"
         class="row"
-        :class="{ picked: isPicked(entry), draggable: !entry.isDir }"
+        :class="{ draggable: !entry.isDir }"
         :draggable="!entry.isDir"
-        @click="onRowClick(entry)"
         @dblclick="onRowDblClick(entry)"
         @dragstart="onDragStart(entry, $event)"
         @dragend="endSftpDrag"
       >
-        <span v-if="selectMode === 'files'" class="c-check">
-          <input
-            v-if="!entry.isDir"
-            type="checkbox"
-            :checked="isPicked(entry)"
-            @click.stop="toggle(entry)"
-          />
-        </span>
         <span class="c-name" :title="entry.isSymlink ? '→ ' + entry.linkTarget : entry.path">
           <svg v-if="entry.isDir" class="ico dir" viewBox="0 0 16 16">
             <path
@@ -394,14 +354,8 @@ watch(
   border-bottom: 1px solid var(--win-stroke);
   cursor: default;
 }
-.row:has(.c-check) {
-  grid-template-columns: 26px minmax(0, 1fr) 90px 130px;
-}
 .row:not(.head):hover {
   background: var(--win-fill-hover);
-}
-.row.picked {
-  background: var(--win-accent-soft);
 }
 .row.head {
   position: sticky;
@@ -412,14 +366,6 @@ watch(
   color: var(--win-text-3);
   font-size: 11px;
   border-bottom: 1px solid var(--win-stroke-strong);
-}
-.c-check {
-  display: flex;
-  align-items: center;
-}
-.c-check input {
-  accent-color: var(--win-accent);
-  cursor: default;
 }
 .c-name {
   display: flex;

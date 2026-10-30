@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -14,6 +15,25 @@ func LocalHome() (string, error) {
 		return "", fmt.Errorf("获取本地家目录失败: %w", err)
 	}
 	return home, nil
+}
+
+// LocalDrives lists the local filesystem roots so the user can switch disks
+// (for example C:\ D:\ E:\) without typing a path.
+func LocalDrives() ([]string, error) {
+	if runtime.GOOS != "windows" {
+		return []string{"/"}, nil
+	}
+	roots := make([]string, 0, 8)
+	for c := 'A'; c <= 'Z'; c++ {
+		root := fmt.Sprintf("%c:\\", c)
+		if _, err := os.Stat(root); err == nil {
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("未找到可用的磁盘")
+	}
+	return roots, nil
 }
 
 // LocalList reads one local directory for the SFTP dual-pane browser.

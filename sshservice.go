@@ -209,6 +209,11 @@ func (s *SSHService) LocalHome() (string, error) {
 	return sshcore.LocalHome()
 }
 
+// LocalDrives lists local filesystem roots (drives on Windows).
+func (s *SSHService) LocalDrives() ([]string, error) {
+	return sshcore.LocalDrives()
+}
+
 // ListLocal lists one local directory for the dual-pane SFTP view.
 func (s *SSHService) ListLocal(dir string) ([]sshcore.RemoteFile, error) {
 	return sshcore.LocalList(dir)

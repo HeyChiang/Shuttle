@@ -82,6 +82,13 @@ export function LoadHosts(): $CancellablePromise<sshcore$0.HostConfig[] | null> 
 }
 
 /**
+ * LocalDrives lists local filesystem roots (drives on Windows).
+ */
+export function LocalDrives(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(1038251475);
+}
+
+/**
  * LocalHome returns the current user's home directory.
  */
 export function LocalHome(): $CancellablePromise<string> {

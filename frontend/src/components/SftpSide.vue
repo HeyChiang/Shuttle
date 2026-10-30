@@ -284,7 +284,6 @@ onBeforeUnmount(() => {
           :key="token + '-' + rev"
           :token="token"
           :initial-dir="cwd"
-          select="files"
           @update:cwd="cwd = $event"
           @drop-files="onDropFiles"
         />

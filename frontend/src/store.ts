@@ -130,7 +130,21 @@ export function startEventBridge() {
   Events.On(SftpProgress, (ev) => {
     const payload = ev.data;
     if (!payload) return;
-    transfers.value = [payload, ...transfers.value].slice(0, 100);
+    // 同一次传输会持续推送进度事件，按任务合并到同一条，避免出现多条进度条。
+    const sameTask = (t: TransferEvent) =>
+      t.sessionId === payload.sessionId &&
+      t.direction === payload.direction &&
+      t.name === payload.name;
+    const at = transfers.value.findIndex((t) => !t.done && sameTask(t));
+    if (at >= 0) transfers.value[at] = payload;
+    else transfers.value = [payload, ...transfers.value].slice(0, 60);
+
+    // 完成的任务短暂保留后移除，让进度区始终只显示正在进行的传输。
+    if (payload.done) {
+      window.setTimeout(() => {
+        transfers.value = transfers.value.filter((t) => !(t.done && sameTask(t)));
+      }, 2000);
+    }
   });
 }
 
