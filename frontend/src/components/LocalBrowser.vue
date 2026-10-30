@@ -23,6 +23,32 @@ const entries = ref<RemoteFile[]>([]);
 const drives = ref<string[]>([]);
 const busy = ref(false);
 const error = ref("");
+/** Ctrl/⌘ 多选选中的条目路径 */
+const selected = ref<Set<string>>(new Set());
+
+function onRowClick(entry: RemoteFile, ev: MouseEvent) {
+  if (ev.ctrlKey || ev.metaKey) {
+    const next = new Set(selected.value);
+    if (next.has(entry.path)) next.delete(entry.path);
+    else next.add(entry.path);
+    selected.value = next;
+    return;
+  }
+  selected.value = new Set([entry.path]);
+}
+
+function clearSelection() {
+  if (selected.value.size) selected.value = new Set();
+}
+
+/** 拖动时携带的路径：拖的是已选条目则整组拖动，否则只拖当前条目 */
+function dragPaths(entry: RemoteFile): string[] {
+  if (!selected.value.has(entry.path)) return [entry.path];
+  const paths = entries.value
+    .filter((e) => !e.isDir && selected.value.has(e.path))
+    .map((e) => e.path);
+  return paths.length ? paths : [entry.path];
+}
 
 function human(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -68,6 +94,7 @@ async function open(dir: string) {
       return a.name.localeCompare(b.name);
     });
     entries.value = list;
+    selected.value = new Set();
     cwd.value = dir;
     pathInput.value = dir;
     emit("update:cwd", dir);
@@ -131,7 +158,8 @@ function onDragStart(entry: RemoteFile, ev: DragEvent) {
     ev.preventDefault();
     return;
   }
-  const paths = [entry.path];
+  if (!selected.value.has(entry.path)) selected.value = new Set([entry.path]);
+  const paths = dragPaths(entry);
   beginSftpDrag({ kind: "local", paths });
   if (ev.dataTransfer) {
     ev.dataTransfer.effectAllowed = "copy";
@@ -228,7 +256,7 @@ onMounted(() => {
 
     <p v-if="error" class="err">{{ error }}</p>
 
-    <div v-else class="list">
+    <div v-else class="list" @click.self="clearSelection">
       <div class="row head">
         <span class="c-name">名称</span>
         <span class="c-size">大小</span>
@@ -239,8 +267,9 @@ onMounted(() => {
         v-for="entry in entries"
         :key="entry.path"
         class="row"
-        :class="{ draggable: !entry.isDir }"
+        :class="{ draggable: !entry.isDir, sel: selected.has(entry.path) }"
         :draggable="!entry.isDir"
+        @click="onRowClick(entry, $event)"
         @dblclick="entry.isDir && open(entry.path)"
         @dragstart="onDragStart(entry, $event)"
         @dragend="endSftpDrag"
@@ -405,6 +434,11 @@ onMounted(() => {
 }
 .row:not(.head):hover {
   background: var(--win-fill-hover);
+}
+.row.sel,
+.row.sel:hover {
+  background: var(--win-accent-soft);
+  color: var(--win-text);
 }
 .row.draggable:active {
   cursor: grabbing;

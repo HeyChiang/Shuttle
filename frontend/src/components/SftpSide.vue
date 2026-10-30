@@ -177,6 +177,44 @@ async function run(okMessage: () => string, work: () => Promise<void>, after?: (
   }
 }
 
+function baseName(p: string): string {
+  const parts = p.split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+/** 目标目录中与本次拖拽文件同名的条目 */
+async function conflictsIn(paths: string[], dir: string): Promise<string[]> {
+  let names: string[] = [];
+  if (props.kind === "local") {
+    const list = (await SSH.ListLocal(dir)) ?? [];
+    names = list.map((e) => e.name);
+  } else {
+    const t = token.value;
+    if (!t) return [];
+    const list = (await SSH.SftpList(t, dir)) ?? [];
+    names = list.map((e) => e.name);
+  }
+  const exist = new Set(names);
+  return [...new Set(paths.map(baseName))].filter((n) => exist.has(n));
+}
+
+/** 存在同名文件时提示将被覆盖，用户取消则中止传输 */
+async function confirmOverwrite(paths: string[], dir: string): Promise<boolean> {
+  let hits: string[] = [];
+  try {
+    hits = await conflictsIn(paths, dir);
+  } catch {
+    // 预检失败不阻塞传输，交给实际传输报错
+    return true;
+  }
+  if (!hits.length) return true;
+  const preview = hits.slice(0, 5).join("、");
+  const more = hits.length > 5 ? ` 等 ${hits.length} 个` : "";
+  return window.confirm(
+    `目标目录已存在同名文件：${preview}${more}\n继续将覆盖这些文件，是否继续？`,
+  );
+}
+
 async function onDropFiles(paths: string[], dir: string) {
   const src = sftpDrag.value;
   endSftpDrag();
@@ -188,6 +226,7 @@ async function onDropFiles(paths: string[], dir: string) {
       error.value = "本地目录尚未就绪";
       return;
     }
+    if (!(await confirmOverwrite(paths, dir))) return;
     await run(
       () => `已下载 ${paths.length} 个文件到 ${dir}`,
       () => SSH.SftpDownload(src.token, paths, dir),
@@ -201,6 +240,7 @@ async function onDropFiles(paths: string[], dir: string) {
   const t = token.value;
   if (!connected.value || !t || !dir) return;
   if (src.kind === "local") {
+    if (!(await confirmOverwrite(paths, dir))) return;
     await run(
       () => `已上传 ${paths.length} 个文件到 ${hostLabel.value}:${dir}`,
       () => SSH.SftpUpload(t, dir, paths),
@@ -211,6 +251,7 @@ async function onDropFiles(paths: string[], dir: string) {
     return;
   }
   if (src.token === t) return;
+  if (!(await confirmOverwrite(paths, dir))) return;
   await run(
     () => `已传输 ${paths.length} 个文件到 ${hostLabel.value}:${dir}`,
     () => SSH.SftpTransfer(src.token, t, paths, dir),
