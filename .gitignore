@@ -71,8 +71,11 @@ frontend/public/puppertino/
 .env.*
 !.env.example
 # 运行期生成的主机档案与本地加密密钥（含连接凭据，不提交）
-hosts.json
 hosts.key
+master.key
+hosts.db
+hosts.db-wal
+hosts.db-shm
 
 # ---------- IDE / 编辑器 ----------
 .idea/
