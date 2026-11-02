@@ -86,10 +86,13 @@ type StatusEvent struct {
 	Message   string `json:"message"`
 }
 
-// ClosedEvent reports that a session ended.
+// ClosedEvent reports that a session ended. Normal is true when the remote
+// shell exited on its own (e.g. the user ran exit/logout) rather than the
+// connection failing, so the frontend can close the tab automatically.
 type ClosedEvent struct {
 	SessionID string `json:"sessionId"`
 	Reason    string `json:"reason"`
+	Normal    bool   `json:"normal"`
 }
 
 // ExecEvent carries the result of a batched command run.

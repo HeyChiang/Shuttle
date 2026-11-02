@@ -1,6 +1,7 @@
 package sshcore
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -235,14 +236,24 @@ func (s *session) pump() {
 func (s *session) wait() {
 	err := s.shell.Wait()
 	reason := "连接已关闭"
+	normal := err == nil
 	if err != nil {
-		reason = err.Error()
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
+			// 远端 shell 正常退出（用户执行 exit / logout），不算连接故障。
+			normal = true
+			if code := exitErr.ExitStatus(); code != 0 {
+				reason = fmt.Sprintf("退出码 %d", code)
+			}
+		} else {
+			reason = err.Error()
+		}
 	}
 	s.mu.Lock()
 	s.closed = true
 	s.reason = reason
 	s.mu.Unlock()
-	s.emit(EventClosed, ClosedEvent{SessionID: s.cfg.SessionID, Reason: reason})
+	s.emit(EventClosed, ClosedEvent{SessionID: s.cfg.SessionID, Reason: reason, Normal: normal})
 	s.close()
 }
 

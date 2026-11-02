@@ -125,6 +125,14 @@ watch(activeId, () => void nextTick(updateTabsOverflow));
 /** 页面切换会增减顶栏按钮，可用宽度随之变化 */
 watch(page, () => void nextTick(updateTabsOverflow));
 
+/** 会话在远端 exit 后自动关闭，若已无终端则回到主页 */
+watch(
+  () => sessions.value.length,
+  (count) => {
+    if (!count && page.value === "term") page.value = "home";
+  },
+);
+
 /** 点击页面空白处收起浮层 */
 function closePopups() {
   hostMenu.value = null;

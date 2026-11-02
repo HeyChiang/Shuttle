@@ -116,6 +116,12 @@ export function startEventBridge() {
     if (!payload) return;
     const s = sessionById(payload.sessionId);
     if (!s) return;
+    // 远端执行 exit / logout 正常退出时直接关闭该终端标签；
+    // 网络中断等异常断开则保留标签，方便用户一键重连。
+    if (payload.normal) {
+      removeSession(payload.sessionId);
+      return;
+    }
     s.status = "closed";
     s.message = payload.reason || "连接已断开";
     selectedIds.delete(payload.sessionId);
