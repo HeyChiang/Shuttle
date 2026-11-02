@@ -1,9 +1,63 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg width="100%" height="100%" viewBox="0 0 583 533" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
-    <g transform="matrix(1,0,0,1,-246,-251)">
-        <g id="Ebene1">
-            <path d="M246,251L265,784L401,784L506,450L507,450L505,784L641,784L829,251L682,251L596,567L595,567L596,251L478,251L378,568L391,251L246,251Z"/>
-        </g>
-    </g>
+<svg width="100%" height="100%" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fur" x1="0.3" y1="0.25" x2="0.7" y2="0.85">
+      <stop offset="0" stop-color="#FFC56C"/>
+      <stop offset="1" stop-color="#F08A14"/>
+    </linearGradient>
+    <clipPath id="head">
+      <ellipse cx="512" cy="576" rx="312" ry="318"/>
+    </clipPath>
+  </defs>
+  <!-- 耳朵 -->
+  <circle cx="306" cy="322" r="122" fill="#F0911E"/>
+  <circle cx="306" cy="322" r="62" fill="#FFBA94"/>
+  <circle cx="718" cy="322" r="122" fill="#F0911E"/>
+  <circle cx="718" cy="322" r="62" fill="#FFBA94"/>
+  <!-- 头部 -->
+  <ellipse cx="512" cy="576" rx="312" ry="318" fill="url(#fur)"/>
+  <!-- 腮红 -->
+  <ellipse cx="345" cy="668" rx="59" ry="38" fill="#FF7878" opacity="0.28"/>
+  <ellipse cx="679" cy="668" rx="59" ry="38" fill="#FF7878" opacity="0.28"/>
+  <!-- 虎纹 -->
+  <g clip-path="url(#head)" stroke="#3E2617" stroke-linecap="round" fill="none">
+    <path d="M512,288 L512,378" stroke-width="42"/>
+    <path d="M430,292 L452,366" stroke-width="40"/>
+    <path d="M594,292 L572,366" stroke-width="40"/>
+    <path d="M212,574 L334,590" stroke-width="34"/>
+    <path d="M202,640 L318,654" stroke-width="33"/>
+    <path d="M812,574 L690,590" stroke-width="34"/>
+    <path d="M822,640 L706,654" stroke-width="33"/>
+  </g>
+  <!-- 眼睛 -->
+  <ellipse cx="410" cy="524" rx="54" ry="60" fill="#3E2617"/>
+  <ellipse cx="410" cy="524" rx="49" ry="55" fill="#FFFDF6"/>
+  <circle cx="424" cy="532" r="29" fill="#1C1610"/>
+  <circle cx="415" cy="517" r="9" fill="#FFFFFF"/>
+  <circle cx="433" cy="545" r="4.5" fill="#FFFFFF" opacity="0.78"/>
+  <ellipse cx="614" cy="524" rx="54" ry="60" fill="#3E2617"/>
+  <ellipse cx="614" cy="524" rx="49" ry="55" fill="#FFFDF6"/>
+  <circle cx="602" cy="532" r="29" fill="#1C1610"/>
+  <circle cx="593" cy="517" r="9" fill="#FFFFFF"/>
+  <circle cx="611" cy="545" r="4.5" fill="#FFFFFF" opacity="0.78"/>
+  <!-- 口鼻区 -->
+  <ellipse cx="470" cy="678" rx="62" ry="52" fill="#FFFAEE"/>
+  <ellipse cx="554" cy="678" rx="62" ry="52" fill="#FFFAEE"/>
+  <ellipse cx="512" cy="714" rx="68" ry="36" fill="#FFFAEE"/>
+  <!-- 鼻子 -->
+  <path d="M486,646 L538,646 L512,676 Z" fill="#3A2416" stroke="#3A2416" stroke-width="28" stroke-linejoin="round"/>
+  <ellipse cx="503" cy="656" rx="9" ry="5.5" fill="#FFFFFF" opacity="0.43"/>
+  <!-- 嘴 -->
+  <path d="M512,676 L512,692" stroke="#3E2617" stroke-width="9" stroke-linecap="round"/>
+  <path d="M512,692 C500,718 480,714 470,690" fill="none" stroke="#3E2617" stroke-width="9" stroke-linecap="round"/>
+  <path d="M512,692 C524,718 544,714 554,690" fill="none" stroke="#3E2617" stroke-width="9" stroke-linecap="round"/>
+  <!-- 胡须点 -->
+  <g fill="#B0763E">
+    <circle cx="454" cy="704" r="5"/>
+    <circle cx="468" cy="720" r="5"/>
+    <circle cx="482" cy="734" r="5"/>
+    <circle cx="570" cy="704" r="5"/>
+    <circle cx="556" cy="720" r="5"/>
+    <circle cx="542" cy="734" r="5"/>
+  </g>
 </svg>
