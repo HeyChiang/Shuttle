@@ -44,10 +44,63 @@
   --win-radius: 6px;
   --win-radius-lg: 10px;
 
+  /* 终端叠加层与滚动条 */
+  --win-overlay: rgba(22, 24, 29, 0.88);
+  --win-spinner-track: rgba(223, 227, 234, 0.14);
+  --win-scroll: rgba(255, 255, 255, 0.14);
+  --win-scroll-hover: rgba(255, 255, 255, 0.26);
+
   --win-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
     "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --win-mono: "JetBrains Mono", "Cascadia Mono", "Cascadia Code", Consolas,
     "Microsoft YaHei UI", monospace;
+}
+
+/* 明亮主题：由 theme.ts 在 <html data-theme="light"> 时启用 */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* 表面 */
+  --win-bg: #f5f6f8;
+  --win-chrome: #f7f8fa;
+  --win-nav: #eef0f4;
+  --win-card: #ffffff;
+  --win-term: #fbfcfd;
+  --win-flyout: #ffffff;
+
+  /* 控件填充 */
+  --win-fill: #eceef2;
+  --win-fill-hover: #e4e7ed;
+  --win-fill-press: #dbe0e8;
+
+  /* 描边 / 分隔 */
+  --win-stroke: #e2e5eb;
+  --win-stroke-strong: #cfd4dd;
+  --win-divider: #e8ebf0;
+
+  /* 文字 */
+  --win-text: #1c2027;
+  --win-text-2: #4f5763;
+  --win-text-3: #7b8493;
+  --win-text-disabled: #aab1bc;
+
+  /* 强调色（浅色底上使用更深的绿，保证对比度） */
+  --win-accent: #12a05c;
+  --win-accent-hover: #0f8f52;
+  --win-accent-press: #0c7c46;
+  --win-accent-text: #ffffff;
+  --win-accent-soft: rgba(18, 160, 92, 0.13);
+
+  --win-close: #e5484d;
+  --win-ok: #12a05c;
+  --win-err: #d93a3a;
+  --win-warn: #b07400;
+
+  /* 终端叠加层与滚动条 */
+  --win-overlay: rgba(247, 249, 251, 0.9);
+  --win-spinner-track: rgba(28, 32, 39, 0.12);
+  --win-scroll: rgba(0, 0, 0, 0.16);
+  --win-scroll-hover: rgba(0, 0, 0, 0.3);
 }
 
 *,
@@ -113,14 +166,14 @@ textarea,
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.14);
+  background-color: var(--win-scroll);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.26);
+  background-color: var(--win-scroll-hover);
 }
 
 ::-webkit-scrollbar-corner {

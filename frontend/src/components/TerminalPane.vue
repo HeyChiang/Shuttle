@@ -14,6 +14,7 @@ import {
   resizeSession,
   sendKeys,
 } from "../store";
+import { isDark, termFontSize } from "../theme";
 import type { SessionInfo } from "../../bindings/shuttle/internal/sshcore/models";
 
 const props = defineProps<{
@@ -56,6 +57,60 @@ const canRetry = computed(
 
 /** 失败原因，仅在可重连状态下展示 */
 const failMessage = computed(() => (canRetry.value ? props.session.message : ""));
+
+// Termius 风格：以品牌绿为主色的中性深色调色板
+const DARK_TERM_THEME = {
+  background: "#16181d",
+  foreground: "#dfe3ea",
+  cursor: "#3ddc84",
+  cursorAccent: "#16181d",
+  selectionBackground: "#2f5d46",
+  black: "#15171c",
+  red: "#ff6b6b",
+  green: "#3ddc84",
+  yellow: "#ffb454",
+  blue: "#5aa9ff",
+  magenta: "#c678dd",
+  cyan: "#56d4dd",
+  white: "#dfe3ea",
+  brightBlack: "#6b7380",
+  brightRed: "#ff8a8a",
+  brightGreen: "#52e694",
+  brightYellow: "#ffc978",
+  brightBlue: "#7dc0ff",
+  brightMagenta: "#d79ae8",
+  brightCyan: "#7fe3e3",
+  brightWhite: "#f5f7fa",
+};
+
+// 明亮主题下的终端配色，保证浅色背景上的可读性
+const LIGHT_TERM_THEME = {
+  background: "#fbfcfd",
+  foreground: "#24292f",
+  cursor: "#12a05c",
+  cursorAccent: "#fbfcfd",
+  selectionBackground: "#bfe3cc",
+  black: "#24292f",
+  red: "#cf222e",
+  green: "#1a7f37",
+  yellow: "#9a6700",
+  blue: "#0969da",
+  magenta: "#8250df",
+  cyan: "#1b7c83",
+  white: "#6e7781",
+  brightBlack: "#57606a",
+  brightRed: "#a40e26",
+  brightGreen: "#116329",
+  brightYellow: "#7d4e00",
+  brightBlue: "#0550ae",
+  brightMagenta: "#6639ba",
+  brightCyan: "#0f6b73",
+  brightWhite: "#8c959f",
+};
+
+function termTheme() {
+  return isDark.value ? DARK_TERM_THEME : LIGHT_TERM_THEME;
+}
 
 function retry() {
   void reconnect(props.session.id);
@@ -131,35 +186,12 @@ async function onContextMenu(e: MouseEvent) {
 onMounted(() => {
   const instance = new Terminal({
     cursorBlink: true,
-    fontSize: 13,
+    fontSize: termFontSize.value,
     lineHeight: 1.25,
     scrollback: 8000,
     fontFamily:
       '"JetBrains Mono", "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace',
-    theme: {
-      background: "#16181d",
-      foreground: "#dfe3ea",
-      cursor: "#3ddc84",
-      cursorAccent: "#16181d",
-      selectionBackground: "#2f5d46",
-      // Termius 风格：以品牌绿为主色的中性深色调色板
-      black: "#15171c",
-      red: "#ff6b6b",
-      green: "#3ddc84",
-      yellow: "#ffb454",
-      blue: "#5aa9ff",
-      magenta: "#c678dd",
-      cyan: "#56d4dd",
-      white: "#dfe3ea",
-      brightBlack: "#6b7380",
-      brightRed: "#ff8a8a",
-      brightGreen: "#52e694",
-      brightYellow: "#ffc978",
-      brightBlue: "#7dc0ff",
-      brightMagenta: "#d79ae8",
-      brightCyan: "#7fe3e3",
-      brightWhite: "#f5f7fa",
-    },
+    theme: termTheme(),
   });
   fit = new FitAddon();
   instance.loadAddon(fit);
@@ -226,6 +258,20 @@ watch(
   () => requestAnimationFrame(doFit),
 );
 
+/** 明暗主题切换时同步终端配色 */
+watch(isDark, () => {
+  const instance = term.value;
+  if (instance) instance.options.theme = termTheme();
+});
+
+/** 字号变更后重新计算行列数并上报远端 PTY */
+watch(termFontSize, (size) => {
+  const instance = term.value;
+  if (!instance) return;
+  instance.options.fontSize = size;
+  requestAnimationFrame(doFit);
+});
+
 function focus() {
   term.value?.focus();
 }
@@ -280,7 +326,7 @@ function focus() {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background: rgba(22, 24, 29, 0.88);
+  background: var(--win-overlay);
   color: var(--win-text-2);
   font-size: 13px;
   text-align: center;
@@ -312,7 +358,7 @@ function focus() {
   transform-origin: 50% 50%;
 }
 .spinner .track {
-  stroke: rgba(223, 227, 234, 0.14);
+  stroke: var(--win-spinner-track);
 }
 .spinner .arc {
   stroke: var(--win-accent);
@@ -378,12 +424,12 @@ function focus() {
   background: transparent;
 }
 :deep(.xterm-viewport)::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.16);
+  background-color: var(--win-scroll);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
 :deep(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.26);
+  background-color: var(--win-scroll-hover);
 }
 </style>

@@ -19,6 +19,14 @@ import {
   sessions,
   startEventBridge,
 } from "./store";
+import {
+  TERM_FONT_MAX,
+  TERM_FONT_MIN,
+  resetAppearance,
+  termFontSize,
+  themeMode,
+  type ThemeMode,
+} from "./theme";
 
 const query = ref("");
 const dialogOpen = ref(false);
@@ -31,6 +39,22 @@ const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement>();
 /** 顶栏已打开终端列表浮层 */
 const sessionMenuOpen = ref(false);
+/** 左侧栏设置入口 */
+const settingsOpen = ref(false);
+const settingsMaskEl = ref<HTMLElement>();
+/** 主题选项：跟随系统 / 浅色 / 深色 */
+const themeOptions: { value: ThemeMode; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
+
+/** 打开设置弹窗后聚焦遮罩，让 Esc 可以直接关闭 */
+watch(settingsOpen, async (open) => {
+  if (!open) return;
+  await nextTick();
+  settingsMaskEl.value?.focus();
+});
 const sessionQuery = ref("");
 const sessionInput = ref<HTMLInputElement>();
 /** 顶栏会话标签是否放不下（放不下的部分收进「更多」按钮） */
@@ -137,6 +161,7 @@ watch(
 function closePopups() {
   hostMenu.value = null;
   sessionMenuOpen.value = false;
+  settingsOpen.value = false;
   if (!searchOpen.value) return;
   searchOpen.value = false;
   // 顶栏搜索与主页搜索共用 query，退出顶栏搜索时清空，避免主页被残留过滤
@@ -552,6 +577,79 @@ function closeSession(id: string) {
       </div>
     </header>
 
+    <!-- 最左侧工具列：底部设置入口 -->
+    <aside class="rail" style="--wails-draggable: no-drag">
+      <button
+        class="rail-btn"
+        :class="{ on: settingsOpen }"
+        title="设置"
+        @click.stop="settingsOpen = true"
+      >
+        <svg viewBox="0 0 20 20">
+          <path
+            d="M8.5 2.8h3l.4 1.8 1.6.9 1.7-.7 1.5 2.6-1.3 1.2v1.8l1.3 1.2-1.5 2.6-1.7-.7-1.6.9-.4 1.8h-3l-.4-1.8-1.6-.9-1.7.7-1.5-2.6 1.3-1.2V8.6L3.3 7.4l1.5-2.6 1.7.7 1.6-.9.4-1.8Z"
+          />
+          <circle cx="10" cy="10" r="2.6" />
+        </svg>
+      </button>
+    </aside>
+
+    <!-- 设置弹窗：独立浮层页面 -->
+    <Teleport to="body">
+      <div
+        v-if="settingsOpen"
+        ref="settingsMaskEl"
+        class="settings-mask"
+        tabindex="-1"
+        @click.self="settingsOpen = false"
+        @keydown.esc="settingsOpen = false"
+      >
+        <div class="settings-dialog" role="dialog" aria-modal="true" aria-label="设置">
+          <header class="settings-head">
+            <strong>设置</strong>
+            <button class="settings-close" title="关闭" @click="settingsOpen = false">×</button>
+          </header>
+
+          <div class="settings-body">
+            <div class="set-group">
+              <span class="set-label">外观</span>
+              <div class="set-seg">
+                <button
+                  v-for="opt in themeOptions"
+                  :key="opt.value"
+                  :class="{ on: themeMode === opt.value }"
+                  @click="themeMode = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+
+            <div class="set-group">
+              <div class="set-row">
+                <span class="set-label">终端文字大小</span>
+                <span class="set-value">{{ termFontSize }} px</span>
+              </div>
+              <input
+                v-model.number="termFontSize"
+                class="set-range"
+                type="range"
+                :min="TERM_FONT_MIN"
+                :max="TERM_FONT_MAX"
+                step="1"
+              />
+              <span class="set-hint">仅影响 SSH 终端中的字符大小</span>
+            </div>
+          </div>
+
+          <footer class="settings-actions">
+            <button class="btn" @click="resetAppearance">恢复默认</button>
+            <button class="btn primary" @click="settingsOpen = false">完成</button>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 第二行：搜索 + 新增（仅主页） -->
     <div v-if="page === 'home'" class="home-bar">
       <input v-model="query" placeholder="搜索主机：IP、备注名或分组" />
@@ -726,8 +824,9 @@ function closeSession(id: string) {
 
 <style scoped>
 .app {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-rows: 38px auto minmax(0, 1fr);
   height: 100%;
   background: var(--win-bg);
   color: var(--win-text);
@@ -735,8 +834,202 @@ function closeSession(id: string) {
   font-size: 13px;
 }
 
+/* ------------------------------------------------------------- 左侧栏 */
+.rail {
+  grid-column: 1;
+  grid-row: 2 / span 2;
+  position: relative;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 10px 0;
+  background: var(--win-nav);
+  border-right: 1px solid var(--win-stroke);
+}
+.rail-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--win-text-3);
+  cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.rail-btn:hover {
+  background: var(--win-fill);
+  color: var(--win-text);
+}
+.rail-btn.on {
+  background: var(--win-fill-press);
+  border-color: var(--win-stroke-strong);
+  color: var(--win-accent);
+}
+.rail-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 设置弹窗：独立浮层页面，居中展示 */
+.settings-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 10, 14, 0.55);
+  backdrop-filter: blur(2px);
+  outline: none;
+  animation: confirm-fade 0.12s ease-out;
+}
+.settings-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 92vw);
+  border: 1px solid var(--win-stroke-strong);
+  border-radius: 14px;
+  background: var(--win-flyout);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: confirm-pop 0.14s ease-out;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+}
+.settings-head strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.settings-close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--win-text-3);
+  font-size: 17px;
+  line-height: 1;
+  cursor: default;
+}
+.settings-close:hover {
+  background: var(--win-fill-hover);
+  color: var(--win-text);
+}
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 2px 18px 18px;
+}
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--win-stroke);
+}
+.settings-actions .btn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 12.5px;
+}
+.set-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.set-label {
+  color: var(--win-text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.set-value {
+  color: var(--win-accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.set-seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 8px;
+  background: var(--win-fill);
+}
+.set-seg button {
+  flex: 1;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--win-text-2);
+  font-size: 12px;
+  cursor: default;
+  white-space: nowrap;
+}
+.set-seg button:hover {
+  background: var(--win-fill-hover);
+  color: var(--win-text);
+}
+.set-seg button.on {
+  border-color: var(--win-stroke-strong);
+  background: var(--win-fill-press);
+  color: var(--win-text);
+  font-weight: 600;
+}
+.set-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  margin: 4px 0;
+  border-radius: 999px;
+  background: var(--win-stroke-strong);
+  outline: none;
+  cursor: default;
+}
+.set-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--win-flyout);
+  border-radius: 50%;
+  background: var(--win-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+.set-hint {
+  color: var(--win-text-3);
+  font-size: 11px;
+}
+
 /* ------------------------------------------------------------- 第一行 */
 .titlebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
   position: relative;
   z-index: 100;
   display: flex;
@@ -1072,6 +1365,8 @@ function closeSession(id: string) {
 
 /* ------------------------------------------------------------- 第二行 */
 .home-bar {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -1111,8 +1406,11 @@ function closeSession(id: string) {
 
 /* ------------------------------------------------------------- 第三行 */
 .content {
+  grid-column: 2;
+  grid-row: 3;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
