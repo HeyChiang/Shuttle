@@ -1,12 +1,22 @@
 <script setup lang="ts">
 // Shuttle 主界面：顶部 SFTP / 主页 / 搜索，主体在主页、终端、SFTP 之间切换。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Window } from "@wailsio/runtime";
+import { Clipboard, Window } from "@wailsio/runtime";
 import * as SSH from "../bindings/shuttle/sshservice";
 import type { HostConfig } from "../bindings/shuttle/internal/sshcore/models";
 import HostDialog from "./components/HostDialog.vue";
+import ScriptRunner from "./components/ScriptRunner.vue";
 import SftpView from "./components/SftpView.vue";
+import SnippetDialog from "./components/SnippetDialog.vue";
 import TerminalPane from "./components/TerminalPane.vue";
+import {
+  deleteSnippet,
+  firstLine,
+  snippets,
+  upsertSnippet,
+  type Snippet,
+} from "./snippets";
+import { highlightShell } from "./highlight";
 import {
   activeId,
   connect,
@@ -32,8 +42,8 @@ const query = ref("");
 const dialogOpen = ref(false);
 const editing = ref<HostConfig | null>(null);
 const isMax = ref(false);
-/** 当前页面：主页 / SFTP / 终端 */
-const page = ref<"home" | "sftp" | "term">("home");
+/** 当前页面：主页 / 代码块 / SFTP / 终端 */
+const page = ref<"home" | "snippets" | "sftp" | "term">("home");
 /** 顶栏搜索面板 */
 const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement>();
@@ -343,6 +353,62 @@ function duplicateHost(host: HostConfig) {
   void persistHosts([...hosts.value, copy]);
 }
 
+// ---------------------------------------------------------------- 代码块
+
+const snippetQuery = ref("");
+const snippetDialogOpen = ref(false);
+const editingSnippet = ref<Snippet | null>(null);
+
+/** 代码块搜索：名称与内容都可匹配 */
+const filteredSnippets = computed(() => {
+  const q = snippetQuery.value.trim().toLowerCase();
+  if (!q) return snippets.value;
+  return snippets.value.filter((s) =>
+    [s.name, s.code].some((v) => (v || "").toLowerCase().includes(q)),
+  );
+});
+
+function openNewSnippet() {
+  editingSnippet.value = null;
+  snippetDialogOpen.value = true;
+}
+
+function openEditSnippet(snippet: Snippet) {
+  editingSnippet.value = { ...snippet };
+  snippetDialogOpen.value = true;
+}
+
+function submitSnippet(snippet: Snippet) {
+  upsertSnippet(snippet);
+  snippetDialogOpen.value = false;
+  editingSnippet.value = null;
+}
+
+function copySnippet(snippet: Snippet) {
+  void Clipboard.SetText(snippet.code);
+}
+
+/** 待删除的代码块：非空时展示自定义删除确认弹窗 */
+const pendingSnippet = ref<Snippet | null>(null);
+const snippetConfirmEl = ref<HTMLElement>();
+
+async function askDeleteSnippet(snippet: Snippet) {
+  pendingSnippet.value = snippet;
+  await nextTick();
+  snippetConfirmEl.value?.focus();
+}
+
+function confirmDeleteSnippet() {
+  const snippet = pendingSnippet.value;
+  pendingSnippet.value = null;
+  if (snippet) deleteSnippet(snippet.id);
+}
+
+/** 代码行数，用于卡片摘要 */
+function snippetLines(code: string): number {
+  return code.replace(/\r\n?/g, "\n").split("\n").length;
+}
+
 function connectHost(host: HostConfig) {
   page.value = "term";
   void connect(host);
@@ -402,7 +468,12 @@ function closeSession(id: string) {
 </script>
 
 <template>
-  <div class="app" @contextmenu.prevent="closePopups" @click="closePopups">
+  <div
+    class="app"
+    :class="{ 'no-rail': page === 'sftp' || page === 'term' }"
+    @contextmenu.prevent="closePopups"
+    @click="closePopups"
+  >
     <!-- 第一行：品牌 + SFTP + 窗口控制 -->
     <header ref="titlebarEl" class="titlebar">
       <div class="tb-brand">
@@ -558,6 +629,9 @@ function closeSession(id: string) {
 
       <div ref="dragEl" class="tb-drag" style="--wails-draggable: drag" />
 
+      <!-- 终端页：代码块按钮固定在最右侧，点击后从右侧滑出抽屉 -->
+      <ScriptRunner v-if="page === 'term'" />
+
       <div class="tb-controls" style="--wails-draggable: no-drag">
         <button class="win-btn" title="最小化" @click="minimise">
           <svg viewBox="0 0 10 10"><path d="M0 5h10" /></svg>
@@ -577,21 +651,58 @@ function closeSession(id: string) {
       </div>
     </header>
 
-    <!-- 最左侧工具列：底部设置入口 -->
-    <aside class="rail" style="--wails-draggable: no-drag">
-      <button
-        class="rail-btn"
-        :class="{ on: settingsOpen }"
-        title="设置"
-        @click.stop="settingsOpen = true"
-      >
-        <svg viewBox="0 0 20 20">
-          <path
-            d="M8.5 2.8h3l.4 1.8 1.6.9 1.7-.7 1.5 2.6-1.3 1.2v1.8l1.3 1.2-1.5 2.6-1.7-.7-1.6.9-.4 1.8h-3l-.4-1.8-1.6-.9-1.7.7-1.5-2.6 1.3-1.2V8.6L3.3 7.4l1.5-2.6 1.7.7 1.6-.9.4-1.8Z"
-          />
-          <circle cx="10" cy="10" r="2.6" />
-        </svg>
-      </button>
+    <!-- 左侧导航列表：主页 / 代码块页展示，终端 / SFTP 页全屏时不占用空间 -->
+    <aside
+      v-if="page === 'home' || page === 'snippets'"
+      class="rail"
+      style="--wails-draggable: no-drag"
+    >
+      <nav class="rail-list">
+        <button
+          class="rail-item"
+          :class="{ on: page === 'home' }"
+          title="主机"
+          @click="page = 'home'"
+        >
+          <svg viewBox="0 0 20 20">
+            <rect x="3.2" y="3.6" width="13.6" height="5.4" rx="1.4" />
+            <rect x="3.2" y="11" width="13.6" height="5.4" rx="1.4" />
+            <path d="M6.2 6.3h2.2M6.2 13.7h2.2" />
+          </svg>
+          <span>主机</span>
+        </button>
+
+        <button
+          class="rail-item"
+          :class="{ on: page === 'snippets' }"
+          title="代码块"
+          @click="page = 'snippets'"
+        >
+          <svg viewBox="0 0 20 20">
+            <path d="M7.4 5.4L3 10l4.4 4.6" />
+            <path d="M12.6 5.4L17 10l-4.4 4.6" />
+            <path d="M10.9 3.8l-1.8 12.4" />
+          </svg>
+          <span>代码块</span>
+        </button>
+      </nav>
+
+      <div class="rail-foot">
+        <button
+          class="rail-item"
+          :class="{ on: settingsOpen }"
+          title="设置"
+          @click.stop="settingsOpen = true"
+        >
+          <svg viewBox="0 0 20 20">
+            <path
+              d="M8.5 2.8h3l.4 1.8 1.6.9 1.7-.7 1.5 2.6-1.3 1.2v1.8l1.3 1.2-1.5 2.6-1.7-.7-1.6.9-.4 1.8h-3l-.4-1.8-1.6-.9-1.7.7-1.5-2.6 1.3-1.2V8.6L3.3 7.4l1.5-2.6 1.7.7 1.6-.9.4-1.8Z"
+            />
+            <circle cx="10" cy="10" r="2.6" />
+          </svg>
+          <span>设置</span>
+        </button>
+      </div>
     </aside>
 
     <!-- 设置弹窗：独立浮层页面 -->
@@ -654,6 +765,12 @@ function closeSession(id: string) {
     <div v-if="page === 'home'" class="home-bar">
       <input v-model="query" placeholder="搜索主机：IP、备注名或分组" />
       <button class="btn primary new-btn" @click="openNew">新增主机</button>
+    </div>
+
+    <!-- 第二行：代码块搜索 + 新增（仅代码块页） -->
+    <div v-if="page === 'snippets'" class="home-bar">
+      <input v-model="snippetQuery" placeholder="搜索代码块：名称或代码内容" />
+      <button class="btn primary new-btn" @click="openNewSnippet">新增代码块</button>
     </div>
 
     <!-- 第三行：服务器列表 / 终端 / SFTP -->
@@ -724,6 +841,70 @@ function closeSession(id: string) {
         </div>
       </section>
 
+      <section v-show="page === 'snippets'" class="list-view">
+        <div class="list-head">
+          <div class="lh-text">
+            <h2>代码块</h2>
+          </div>
+        </div>
+
+        <div v-if="filteredSnippets.length" class="cards">
+          <article
+            v-for="s in filteredSnippets"
+            :key="s.id"
+            class="card snippet-card"
+            @dblclick="openEditSnippet(s)"
+          >
+            <div class="card-top">
+              <span class="snippet-icon">
+                <svg viewBox="0 0 20 20">
+                  <path d="M7.4 5.4L3 10l4.4 4.6" />
+                  <path d="M12.6 5.4L17 10l-4.4 4.6" />
+                  <path d="M10.9 3.8l-1.8 12.4" />
+                </svg>
+              </span>
+              <div class="who">
+                <strong>{{ s.name }}</strong>
+                <small>{{ snippetLines(s.code) }} 行 · {{ firstLine(s.code) }}</small>
+              </div>
+
+              <div class="more snippet-actions">
+                <button class="more-btn" title="复制代码" @click.stop="copySnippet(s)">
+                  <svg viewBox="0 0 16 16">
+                    <rect x="5.6" y="5.6" width="8" height="8" rx="1.6" />
+                    <path d="M10.4 3.2H4.2a1.6 1.6 0 0 0-1.6 1.6v6.2" />
+                  </svg>
+                </button>
+                <button class="more-btn" title="编辑" @click.stop="openEditSnippet(s)">
+                  <svg viewBox="0 0 16 16">
+                    <path d="M11.3 2.7l2 2-7.4 7.4-2.7.7.7-2.7 7.4-7.4Z" />
+                  </svg>
+                </button>
+                <button class="more-btn danger" title="删除" @click.stop="askDeleteSnippet(s)">
+                  <svg viewBox="0 0 16 16">
+                    <path
+                      d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.5a1 1 0 0 0 1 .9h3.9a1 1 0 0 0 1-.9l.6-8.5"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <pre class="snippet-code"><code v-html="highlightShell(s.code)" /></pre>
+          </article>
+        </div>
+
+        <div v-if="!snippets.length" class="empty-state">
+          <h3>还没有代码块</h3>
+          <p>把常用的巡检、部署脚本保存下来，在 SSH 终端里可一键引入执行。</p>
+          <button class="btn primary" @click="openNewSnippet">新增代码块</button>
+        </div>
+        <div v-else-if="!filteredSnippets.length" class="empty-state">
+          <h3>没有匹配的代码块</h3>
+          <p>换个名称或代码关键词试试。</p>
+        </div>
+      </section>
+
       <section v-show="page === 'term'" class="term-view">
         <div class="terminals">
           <TerminalPane
@@ -744,6 +925,13 @@ function closeSession(id: string) {
       :host="editing"
       @submit="submitHost"
       @cancel="dialogOpen = false"
+    />
+
+    <SnippetDialog
+      v-if="snippetDialogOpen"
+      :snippet="editingSnippet"
+      @submit="submitSnippet"
+      @cancel="snippetDialogOpen = false"
     />
 
     <!-- 删除确认：自定义弹窗，替代浏览器原生 confirm -->
@@ -776,6 +964,41 @@ function closeSession(id: string) {
           <div class="confirm-actions">
             <button class="btn" @click="pendingDelete = null">取消</button>
             <button class="btn danger" @click="confirmDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 删除代码块确认 -->
+    <Teleport to="body">
+      <div
+        v-if="pendingSnippet"
+        ref="snippetConfirmEl"
+        class="confirm-mask"
+        tabindex="-1"
+        @click.self="pendingSnippet = null"
+        @keydown.esc="pendingSnippet = null"
+      >
+        <div class="confirm-dialog" role="alertdialog" aria-modal="true">
+          <div class="confirm-head">
+            <span class="confirm-icon">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.5a1 1 0 0 0 1 .9h3.9a1 1 0 0 0 1-.9l.6-8.5"
+                />
+              </svg>
+            </span>
+            <div class="confirm-text">
+              <h3>删除代码块</h3>
+              <p>
+                确定要删除「<strong>{{ pendingSnippet.name }}</strong
+                >」吗？
+              </p>
+            </div>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn" @click="pendingSnippet = null">取消</button>
+            <button class="btn danger" @click="confirmDeleteSnippet">删除</button>
           </div>
         </div>
       </div>
@@ -825,7 +1048,7 @@ function closeSession(id: string) {
 <style scoped>
 .app {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   grid-template-rows: 38px auto minmax(0, 1fr);
   height: 100%;
   background: var(--win-bg);
@@ -833,8 +1056,15 @@ function closeSession(id: string) {
   overflow: hidden;
   font-size: 13px;
 }
+/* 终端 / SFTP 页隐藏左侧导航，内容占满整窗 */
+.app.no-rail {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app.no-rail .content {
+  grid-column: 1;
+}
 
-/* ------------------------------------------------------------- 左侧栏 */
+/* ------------------------------------------------------------- 左侧导航列表 */
 .rail {
   grid-column: 1;
   grid-row: 2 / span 2;
@@ -842,42 +1072,59 @@ function closeSession(id: string) {
   z-index: 90;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  padding: 10px 0;
+  padding: 10px;
   background: var(--win-nav);
   border-right: 1px solid var(--win-stroke);
 }
-.rail-btn {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
+.rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rail-foot {
+  margin-top: auto;
+}
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
-  color: var(--win-text-3);
+  color: var(--win-text-2);
+  font-size: 12.5px;
+  text-align: left;
   cursor: default;
   transition: background 0.12s ease, color 0.12s ease;
 }
-.rail-btn:hover {
+.rail-item:hover:not(:disabled) {
   background: var(--win-fill);
   color: var(--win-text);
 }
-.rail-btn.on {
+.rail-item.on {
   background: var(--win-fill-press);
   border-color: var(--win-stroke-strong);
-  color: var(--win-accent);
+  color: var(--win-text);
+  font-weight: 600;
 }
-.rail-btn svg {
-  width: 20px;
-  height: 20px;
+.rail-item:disabled {
+  color: var(--win-text-disabled);
+}
+.rail-item svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.3;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.rail-item.on svg {
+  stroke: var(--win-accent);
 }
 
 /* 设置弹窗：独立浮层页面，居中展示 */
@@ -1562,6 +1809,59 @@ function closeSession(id: string) {
   width: 15px;
   height: 15px;
   fill: currentColor;
+}
+
+/* 代码块卡片：图标 + 名称 + 代码预览 */
+.snippet-card {
+  gap: 10px;
+}
+.snippet-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+}
+.snippet-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.snippet-code {
+  margin: 0;
+  max-height: 120px;
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 8px;
+  background: var(--win-term);
+  color: var(--win-text-2);
+  font-family: var(--win-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.snippet-actions {
+  display: flex;
+  gap: 2px;
+}
+.snippet-actions .more-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.more-btn.danger:hover {
+  color: var(--win-err);
 }
 
 /* 卡片操作菜单：右键与「更多」按钮共用，跟随界面深色风格 */

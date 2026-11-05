@@ -41,6 +41,16 @@
   --win-err: #ff6b6b;
   --win-warn: #ffb454;
 
+  /* Shell 语法高亮 */
+  --win-code-com: #6f7887;
+  --win-code-str: #ce9178;
+  --win-code-var: #9cdcfe;
+  --win-code-key: #c586c0;
+  --win-code-cmd: #dcdcaa;
+  --win-code-num: #b5cea8;
+  --win-code-op: #ff9e64;
+  --win-code-opt: #569cd6;
+
   --win-radius: 6px;
   --win-radius-lg: 10px;
 
@@ -95,6 +105,16 @@
   --win-ok: #12a05c;
   --win-err: #d93a3a;
   --win-warn: #b07400;
+
+  /* Shell 语法高亮 */
+  --win-code-com: #8b929e;
+  --win-code-str: #a31515;
+  --win-code-var: #0b5cad;
+  --win-code-key: #af00db;
+  --win-code-cmd: #795e26;
+  --win-code-num: #098658;
+  --win-code-op: #b34000;
+  --win-code-opt: #0451a5;
 
   /* 终端叠加层与滚动条 */
   --win-overlay: rgba(247, 249, 251, 0.9);
@@ -178,4 +198,31 @@ textarea,
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Shell 语法高亮 token（由 highlight.ts 生成） */
+.tk-com {
+  color: var(--win-code-com);
+  font-style: italic;
+}
+.tk-str {
+  color: var(--win-code-str);
+}
+.tk-var {
+  color: var(--win-code-var);
+}
+.tk-key {
+  color: var(--win-code-key);
+}
+.tk-cmd {
+  color: var(--win-code-cmd);
+}
+.tk-num {
+  color: var(--win-code-num);
+}
+.tk-op {
+  color: var(--win-code-op);
+}
+.tk-opt {
+  color: var(--win-code-opt);
 }
