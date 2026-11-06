@@ -61,6 +61,23 @@ export function Exec(ids: string[] | null, command: string): $CancellablePromise
 }
 
 /**
+ * ExportHosts writes every saved profile to a JSON file chosen by the user.
+ * The exported file contains decrypted credentials; the UI warns about this
+ * before calling.
+ */
+export function ExportHosts(): $CancellablePromise<string> {
+    return $Call.ByID(1404015724);
+}
+
+/**
+ * ImportHosts reads profiles from a JSON file chosen by the user. The profiles
+ * are not persisted here: the caller merges them into the current list.
+ */
+export function ImportHosts(): $CancellablePromise<sshcore$0.HostConfig[] | null> {
+    return $Call.ByID(290546385);
+}
+
+/**
  * ListLocal lists one local directory for the dual-pane SFTP view.
  */
 export function ListLocal(dir: string): $CancellablePromise<sshcore$0.RemoteFile[] | null> {

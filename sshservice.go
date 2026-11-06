@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -50,6 +53,69 @@ func (s *SSHService) LoadHosts() ([]sshcore.HostConfig, error) {
 // SaveHosts overwrites the saved connection profiles.
 func (s *SSHService) SaveHosts(hosts []sshcore.HostConfig) error {
 	return s.store.Save(hosts)
+}
+
+// ExportHosts writes every saved profile to a JSON file chosen by the user.
+// The exported file contains decrypted credentials; the UI warns about this
+// before calling.
+func (s *SSHService) ExportHosts() (string, error) {
+	hosts, err := s.store.Load()
+	if err != nil {
+		return "", err
+	}
+	if len(hosts) == 0 {
+		return "", fmt.Errorf("还没有可导出的主机")
+	}
+	dialog := saveFileDialog()
+	if dialog == nil {
+		return "", fmt.Errorf("应用尚未就绪")
+	}
+	dialog.SetMessage("导出主机配置")
+	dialog.SetFilename("shuttle-hosts-" + time.Now().Format("20060102") + ".json")
+	dialog.AddFilter("JSON 文件", "*.json")
+	path, err := dialog.PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil
+	}
+	data, err := json.MarshalIndent(hosts, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("生成导出文件失败: %w", err)
+	}
+	// 文件内含明文凭据，权限尽量收紧。
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		return "", fmt.Errorf("写入导出文件失败: %w", err)
+	}
+	return path, nil
+}
+
+// ImportHosts reads profiles from a JSON file chosen by the user. The profiles
+// are not persisted here: the caller merges them into the current list.
+func (s *SSHService) ImportHosts() ([]sshcore.HostConfig, error) {
+	dialog := openFileDialog()
+	if dialog == nil {
+		return nil, fmt.Errorf("应用尚未就绪")
+	}
+	dialog.SetTitle("导入主机配置")
+	dialog.AddFilter("JSON 文件", "*.json")
+	path, err := dialog.PromptForSingleSelection()
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取导入文件失败: %w", err)
+	}
+	var hosts []sshcore.HostConfig
+	if err := json.Unmarshal(data, &hosts); err != nil {
+		return nil, fmt.Errorf("解析导入文件失败: %w", err)
+	}
+	return hosts, nil
 }
 
 // --- session lifecycle -----------------------------------------------------
@@ -224,6 +290,13 @@ func (s *SSHService) ListLocal(dir string) ([]sshcore.RemoteFile, error) {
 func openFileDialog() *application.OpenFileDialogStruct {
 	if app := application.Get(); app != nil {
 		return app.Dialog.OpenFile()
+	}
+	return nil
+}
+
+func saveFileDialog() *application.SaveFileDialogStruct {
+	if app := application.Get(); app != nil {
+		return app.Dialog.SaveFile()
 	}
 	return nil
 }

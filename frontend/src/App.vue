@@ -19,11 +19,13 @@ import {
 import { highlightShell } from "./highlight";
 import {
   activeId,
+  blankHost,
   connect,
   disconnect,
   encodings,
   hosts,
   loadHosts,
+  newSessionId,
   persistHosts,
   sessionLabel,
   sessions,
@@ -170,6 +172,7 @@ watch(
 /** 点击页面空白处收起浮层 */
 function closePopups() {
   hostMenu.value = null;
+  railMenu.value = null;
   sessionMenuOpen.value = false;
   settingsOpen.value = false;
   if (!searchOpen.value) return;
@@ -305,7 +308,10 @@ onMounted(async () => {
   await loadHosts();
 });
 
-onBeforeUnmount(() => titlebarObserver?.disconnect());
+onBeforeUnmount(() => {
+  titlebarObserver?.disconnect();
+  window.clearTimeout(noticeTimer);
+});
 
 function openNew() {
   editing.value = null;
@@ -351,6 +357,66 @@ function duplicateHost(host: HostConfig) {
     name: `${host.name || host.host} 副本`,
   };
   void persistHosts([...hosts.value, copy]);
+}
+
+// ---------------------------------------------------------------- 导入 / 导出
+
+/** 导入、导出的结果提示，短暂显示在窗口底部 */
+const notice = ref("");
+let noticeTimer: number | undefined;
+
+function showNotice(text: string) {
+  notice.value = text;
+  window.clearTimeout(noticeTimer);
+  noticeTimer = window.setTimeout(() => {
+    notice.value = "";
+  }, 3600);
+}
+
+/** 导出确认弹窗：导出文件包含明文凭据，先提示用户 */
+const exportConfirmOpen = ref(false);
+const exportConfirmEl = ref<HTMLElement>();
+
+async function askExportHosts() {
+  if (!hosts.value.length) return;
+  exportConfirmOpen.value = true;
+  await nextTick();
+  exportConfirmEl.value?.focus();
+}
+
+async function exportHosts() {
+  exportConfirmOpen.value = false;
+  try {
+    const path = await SSH.ExportHosts();
+    if (path) showNotice(`已导出到 ${path}`);
+  } catch (e) {
+    showNotice(String(e));
+  }
+}
+
+/** 导入主机：按 user@host:port 去重后追加到现有列表 */
+async function importHosts() {
+  try {
+    const list = (await SSH.ImportHosts()) ?? [];
+    const exists = new Set(hosts.value.map((h) => `${h.user}@${h.host}:${h.port}`));
+    const added: HostConfig[] = [];
+    for (const item of list) {
+      if (!item?.host) continue;
+      const key = `${item.user}@${item.host}:${item.port}`;
+      if (exists.has(key)) continue;
+      exists.add(key);
+      // 重新生成 id，避免与现有档案冲突。
+      added.push({ ...blankHost(), ...item, id: newSessionId(), sessionId: "" });
+    }
+    if (!added.length) {
+      showNotice(list.length ? "导入完成：没有新增主机（均已存在）" : "文件里没有主机配置");
+      return;
+    }
+    await persistHosts([...hosts.value, ...added]);
+    showNotice(`已导入 ${added.length} 台主机`);
+  } catch (e) {
+    showNotice(String(e));
+  }
 }
 
 // ---------------------------------------------------------------- 代码块
@@ -412,6 +478,35 @@ function snippetLines(code: string): number {
 function connectHost(host: HostConfig) {
   page.value = "term";
   void connect(host);
+}
+
+/** 左侧「主机」项旁的导入 / 导出菜单 */
+const railMenu = ref<{ left: number; top: number } | null>(null);
+const railMenuEl = ref<HTMLElement>();
+
+/** 在「主机」导航项右侧弹出导入导出菜单 */
+async function toggleRailMenu(e: MouseEvent) {
+  if (railMenu.value) {
+    railMenu.value = null;
+    return;
+  }
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  let left = rect.right + 6;
+  let top = rect.top;
+  railMenu.value = { left, top };
+  await nextTick();
+  const el = railMenuEl.value;
+  if (!el || !railMenu.value) return;
+  const menu = el.getBoundingClientRect();
+  left = Math.max(8, Math.min(left, window.innerWidth - menu.width - 8));
+  top = Math.max(8, Math.min(top, window.innerHeight - menu.height - 8));
+  railMenu.value = { left, top };
+}
+
+function runRailAction(action: "import" | "export") {
+  railMenu.value = null;
+  if (action === "import") void importHosts();
+  else void askExportHosts();
 }
 
 /** 主页卡片操作菜单：当前主机 + 相对视口的坐标 */
@@ -658,19 +753,34 @@ function closeSession(id: string) {
       style="--wails-draggable: no-drag"
     >
       <nav class="rail-list">
-        <button
-          class="rail-item"
-          :class="{ on: page === 'home' }"
-          title="主机"
-          @click="page = 'home'"
-        >
-          <svg viewBox="0 0 20 20">
-            <rect x="3.2" y="3.6" width="13.6" height="5.4" rx="1.4" />
-            <rect x="3.2" y="11" width="13.6" height="5.4" rx="1.4" />
-            <path d="M6.2 6.3h2.2M6.2 13.7h2.2" />
-          </svg>
-          <span>主机</span>
-        </button>
+        <div class="rail-host">
+          <button
+            class="rail-item"
+            :class="{ on: page === 'home' }"
+            title="主机"
+            @click="page = 'home'"
+          >
+            <svg viewBox="0 0 20 20">
+              <rect x="3.2" y="3.6" width="13.6" height="5.4" rx="1.4" />
+              <rect x="3.2" y="11" width="13.6" height="5.4" rx="1.4" />
+              <path d="M6.2 6.3h2.2M6.2 13.7h2.2" />
+            </svg>
+            <span>主机</span>
+          </button>
+          <button
+            class="rail-more"
+            :class="{ on: railMenu }"
+            title="导入 / 导出主机配置"
+            aria-label="导入或导出主机配置"
+            @click.stop="toggleRailMenu"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="3.2" cy="8" r="1.15" />
+              <circle cx="8" cy="8" r="1.15" />
+              <circle cx="12.8" cy="8" r="1.15" />
+            </svg>
+          </button>
+        </div>
 
         <button
           class="rail-item"
@@ -832,8 +942,11 @@ function closeSession(id: string) {
 
         <div v-if="!hosts.length" class="empty-state">
           <h3>还没有保存主机连接</h3>
-          <p>点击「新增主机」添加第一条 SSH 连接信息。</p>
-          <button class="btn primary" @click="openNew">新增主机</button>
+          <p>点击「新增主机」添加第一条 SSH 连接信息，或从已有配置文件导入。</p>
+          <div class="empty-actions">
+            <button class="btn primary" @click="openNew">新增主机</button>
+            <button class="btn" @click="importHosts">从文件导入</button>
+          </div>
         </div>
         <div v-else-if="!homeSections.length" class="empty-state">
           <h3>没有匹配的服务器</h3>
@@ -1004,6 +1117,70 @@ function closeSession(id: string) {
       </div>
     </Teleport>
 
+    <!-- 导出确认：导出文件包含明文凭据，先提示用户 -->
+    <Teleport to="body">
+      <div
+        v-if="exportConfirmOpen"
+        ref="exportConfirmEl"
+        class="confirm-mask"
+        tabindex="-1"
+        @click.self="exportConfirmOpen = false"
+        @keydown.esc="exportConfirmOpen = false"
+      >
+        <div class="confirm-dialog" role="alertdialog" aria-modal="true">
+          <div class="confirm-head">
+            <span class="confirm-icon warn">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 2.6v7.2M5.2 7L8 9.8 10.8 7M3.2 12.4v1h9.6v-1" />
+              </svg>
+            </span>
+            <div class="confirm-text">
+              <h3>导出主机配置</h3>
+              <p>
+                导出的 JSON 文件包含<strong>明文密码</strong>和私钥口令，请妥善保管，不要上传到公开位置。
+              </p>
+            </div>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn" @click="exportConfirmOpen = false">取消</button>
+            <button class="btn primary" @click="exportHosts">继续导出</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 导入 / 导出结果提示 -->
+    <div v-if="notice" class="toast">{{ notice }}</div>
+
+    <!-- 左侧「主机」项：导入 / 导出菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="railMenu"
+        ref="railMenuEl"
+        class="host-menu"
+        :style="{ left: `${railMenu.left}px`, top: `${railMenu.top}px` }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button class="host-menu-item" @click="runRailAction('import')">
+          <svg viewBox="0 0 16 16">
+            <path d="M8 2.8v7M5.2 6.9L8 9.7l2.8-2.8M3.2 12.4v1h9.6v-1" />
+          </svg>
+          导入主机
+        </button>
+        <button
+          class="host-menu-item"
+          :disabled="!hosts.length"
+          @click="runRailAction('export')"
+        >
+          <svg viewBox="0 0 16 16">
+            <path d="M8 9.9V2.9M5.2 5.9L8 3.1l2.8 2.8M3.2 12.4v1h9.6v-1" />
+          </svg>
+          导出主机
+        </button>
+      </div>
+    </Teleport>
+
     <!-- 主页卡片操作菜单：跟随光标或「更多」按钮，统一弹在 body 上避免被卡片裁剪 -->
     <Teleport to="body">
       <div
@@ -1125,6 +1302,47 @@ function closeSession(id: string) {
 }
 .rail-item.on svg {
   stroke: var(--win-accent);
+}
+/* 「主机」项悬停时右侧露出导入 / 导出入口 */
+.rail-host {
+  position: relative;
+}
+.rail-host .rail-item {
+  padding-right: 34px;
+}
+.rail-more {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--win-text-3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.rail-host:hover .rail-more,
+.rail-more:focus-visible,
+.rail-more.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.rail-more:hover {
+  background: var(--win-fill-hover);
+  color: var(--win-text);
+}
+.rail-more svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  stroke: none;
 }
 
 /* 设置弹窗：独立浮层页面，居中展示 */
@@ -1925,6 +2143,15 @@ function closeSession(id: string) {
 .host-menu-item.danger:hover {
   background: rgba(255, 107, 107, 0.1);
 }
+.host-menu-item:disabled {
+  color: var(--win-text-disabled);
+}
+.host-menu-item:disabled svg {
+  color: var(--win-text-disabled);
+}
+.host-menu-item:disabled:hover {
+  background: transparent;
+}
 .host-menu-sep {
   height: 1px;
   margin: 4px 6px;
@@ -1977,6 +2204,10 @@ function closeSession(id: string) {
   stroke-width: 1.3;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.confirm-icon.warn {
+  background: rgba(255, 180, 84, 0.14);
+  color: var(--win-warn);
 }
 .confirm-text {
   min-width: 0;
@@ -2084,6 +2315,31 @@ function closeSession(id: string) {
 .empty-state p {
   margin: 0 0 8px;
   font-size: 12px;
+}
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 导入 / 导出结果提示 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 190;
+  max-width: min(680px, 80vw);
+  padding: 9px 15px;
+  border: 1px solid var(--win-stroke-strong);
+  border-radius: 9px;
+  background: var(--win-flyout);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  color: var(--win-text);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: confirm-pop 0.14s ease-out;
 }
 
 /* ------------------------------------------------------------- 终端视图 */
