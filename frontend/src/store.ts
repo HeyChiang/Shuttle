@@ -1,6 +1,6 @@
 // 全局状态与后端事件路由。
 // 所有 Wails 事件只在这里订阅一次，再分发给各终端与面板组件。
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { Events } from "@wailsio/runtime";
 import * as SSH from "../bindings/shuttle/sshservice";
 import {
@@ -32,6 +32,167 @@ export const syncInput = ref(false);
 export const selectedIds = reactive(new Set<string>());
 /** 当前聚焦的会话 */
 export const activeId = ref("");
+
+// ---------------------------------------------------------------- 合并分屏
+
+/** 分屏方向：row = 左右并排，column = 上下排列 */
+export type SplitDirection = "row" | "column";
+
+/** 分屏布局树：叶子是一个终端，split 节点把所在区域按方向切成若干份 */
+export type SplitNode =
+  | { type: "leaf"; id: string }
+  | { type: "split"; direction: SplitDirection; children: SplitNode[] };
+
+/** 合并显示的终端分组：ids 为组内全部会话，layout 决定嵌套分屏结构 */
+export interface SplitGroup {
+  ids: string[];
+  layout: SplitNode;
+}
+
+/** 合并显示的终端分组：每组是一组会话 id，未分组的会话单独占一个标签。 */
+export const splitGroups = ref<SplitGroup[]>([]);
+/** 分屏同步输入：打开后组内任一终端输入都会广播到同组其他终端。 */
+export const splitSync = ref(false);
+
+/** 顶栏标签：单个会话，或合并后的多个会话 */
+export interface SessionTab {
+  key: string;
+  sessions: SessionInfo[];
+  group: boolean;
+}
+
+/** 顶栏标签列表，按会话连接顺序排列；合并组出现在其首个成员的位置。 */
+export const tabs = computed<SessionTab[]>(() => {
+  const out: SessionTab[] = [];
+  const used = new Set<string>();
+  for (const s of sessions.value) {
+    if (used.has(s.id)) continue;
+    const group = splitGroups.value.find((g) => g.ids.includes(s.id));
+    if (group) {
+      const list = group.ids
+        .map((id) => sessionById(id))
+        .filter((item): item is SessionInfo => !!item);
+      list.forEach((item) => used.add(item.id));
+      if (list.length) {
+        out.push({
+          key: `g:${list.map((item) => item.id).join(",")}`,
+          sessions: list,
+          group: list.length > 1,
+        });
+      }
+    } else {
+      used.add(s.id);
+      out.push({ key: `s:${s.id}`, sessions: [s], group: false });
+    }
+  }
+  return out;
+});
+
+/** 某会话所在的分组（未分组时返回 undefined） */
+export function splitGroupOf(id: string): SplitGroup | undefined {
+  return splitGroups.value.find((g) => g.ids.includes(id));
+}
+
+/** 从布局树里移除若干终端，返回修剪后的树（全部移除时为 null） */
+function pruneLeaves(node: SplitNode, ids: string[]): SplitNode | null {
+  if (node.type === "leaf") return ids.includes(node.id) ? null : node;
+  const children = node.children
+    .map((child) => pruneLeaves(child, ids))
+    .filter((child): child is SplitNode => !!child);
+  if (!children.length) return null;
+  if (children.length === 1) return children[0];
+  return { type: "split", direction: node.direction, children };
+}
+
+/** 把布局树里的一个叶子替换成新的子树 */
+function replaceLeaf(node: SplitNode, id: string, next: SplitNode): SplitNode {
+  if (node.type === "leaf") return node.id === id ? next : node;
+  return {
+    type: "split",
+    direction: node.direction,
+    children: node.children.map((child) => replaceLeaf(child, id, next)),
+  };
+}
+
+/**
+ * 把拖入的标签并入指定终端面板：只在该面板内再分屏，组内其他面板的大小不受影响。
+ * direction / sourceFirst 由拖放落点在目标面板内的位置决定。
+ * 返回合并后的会话 id 列表。
+ */
+export function mergeIntoPane(
+  sourceIds: string[],
+  targetId: string,
+  direction: SplitDirection,
+  sourceFirst = false,
+): string[] {
+  const src = sourceIds.filter((id) => id !== targetId && sessionById(id));
+  const group = splitGroupOf(targetId);
+  if (!src.length) return group?.ids ?? [targetId];
+  // 拖来的标签已经和目标面板在同一个工作组里：不做处理
+  if (group && src.some((id) => group.ids.includes(id))) return group.ids;
+
+  const targetLeaf: SplitNode = { type: "leaf", id: targetId };
+  const sources: SplitNode[] = src.map((id) => ({ type: "leaf", id }));
+  const split: SplitNode = {
+    type: "split",
+    direction,
+    children: sourceFirst ? [...sources, targetLeaf] : [targetLeaf, ...sources],
+  };
+
+  // 先把来源会话从各自的分组里摘掉，剩一个成员的组自动解散
+  const next = splitGroups.value
+    .filter((g) => g !== group)
+    .map((g): SplitGroup | null => {
+      if (!g.ids.some((id) => src.includes(id))) return g;
+      const ids = g.ids.filter((id) => !src.includes(id));
+      const layout = pruneLeaves(g.layout, src);
+      return layout && ids.length > 1 ? { ids, layout } : null;
+    })
+    .filter((g): g is SplitGroup => !!g);
+
+  const mergedIds = group ? [...group.ids, ...src] : [targetId, ...src];
+  const layout = group ? replaceLeaf(group.layout, targetId, split) : split;
+  next.push({ ids: mergedIds, layout });
+  splitGroups.value = next;
+  return mergedIds;
+}
+
+/** 交换两个标签的位置（合并组作为一个整体移动）。 */
+export function swapTabs(sourceIds: string[], targetIds: string[]) {
+  if (sourceIds.some((id) => targetIds.includes(id))) return;
+  const list = tabs.value;
+  const srcIdx = list.findIndex((t) =>
+    t.sessions.some((s) => sourceIds.includes(s.id)),
+  );
+  const dstIdx = list.findIndex((t) =>
+    t.sessions.some((s) => targetIds.includes(s.id)),
+  );
+  if (srcIdx < 0 || dstIdx < 0 || srcIdx === dstIdx) return;
+  const next = [...list];
+  [next[srcIdx], next[dstIdx]] = [next[dstIdx], next[srcIdx]];
+  sessions.value = next.flatMap((t) => t.sessions);
+}
+
+/** 拆分分组：组内会话恢复为各自独立的标签。 */
+export function splitGroup(id: string) {
+  const group = splitGroups.value.find((g) => g.ids.includes(id));
+  if (!group) return;
+  splitGroups.value = splitGroups.value.filter((g) => g !== group);
+}
+
+/** 把某个会话从合并组里移出，恢复成独立标签（其余成员仍留在组内）。 */
+export function detachFromGroup(id: string) {
+  const group = splitGroupOf(id);
+  if (!group) return;
+  const rest = group.ids.filter((sid) => sid !== id);
+  const layout = pruneLeaves(group.layout, [id]);
+  splitGroups.value = splitGroups.value
+    .map((g): SplitGroup | null =>
+      g === group ? (layout && rest.length > 1 ? { ids: rest, layout } : null) : g,
+    )
+    .filter((g): g is SplitGroup => !!g);
+}
+
 /** 会话 id -> 原始连接档案，用于断线后重新连接 */
 const sessionConfigs = new Map<string, HostConfig>();
 /** 广播命令的执行结果 */
@@ -297,15 +458,37 @@ export function removeSession(id: string) {
   selectedIds.delete(id);
   dataSinks.delete(id);
   sessionConfigs.delete(id);
+  // 同步清理合并分组：只剩一个成员的组自动拆散
+  splitGroups.value = splitGroups.value
+    .map((g): SplitGroup | null => {
+      const ids = g.ids.filter((sid) => sid !== id);
+      const layout = pruneLeaves(g.layout, [id]);
+      return layout && ids.length > 1 ? { ids, layout } : null;
+    })
+    .filter((g): g is SplitGroup => !!g);
   if (activeId.value === id) {
     activeId.value = sessions.value[0]?.id ?? "";
   }
 }
 
-/** 发送按键。syncInput 打开时 ids 为空 => 后端广播到所有连接。 */
+/** 发送按键。分屏同步时只广播到同组会话，全局同步时广播到全部连接。 */
 export function sendKeys(id: string, data: string) {
-  const ids = syncInput.value ? [] : [id];
-  SSH.Write(ids, data).catch((e) => console.error("发送失败", e));
+  if (syncInput.value) {
+    SSH.Write([], data).catch((e) => console.error("发送失败", e));
+    return;
+  }
+  const group = splitGroupOf(id);
+  if (splitSync.value && group && group.ids.length > 1) {
+    const ids = group.ids.filter((sid) => {
+      const s = sessionById(sid);
+      return s ? isConnected(s) : false;
+    });
+    SSH.Write(ids.length ? ids : [id], data).catch((e) =>
+      console.error("发送失败", e),
+    );
+    return;
+  }
+  SSH.Write([id], data).catch((e) => console.error("发送失败", e));
 }
 
 /** 广播一条命令到所选会话。 */

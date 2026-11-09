@@ -21,15 +21,25 @@ import {
   activeId,
   blankHost,
   connect,
+  detachFromGroup,
   disconnect,
   encodings,
   hosts,
   loadHosts,
+  mergeIntoPane,
   newSessionId,
   persistHosts,
   sessionLabel,
   sessions,
+  splitGroup,
+  splitGroupOf,
+  splitSync,
   startEventBridge,
+  swapTabs,
+  tabs,
+  type SessionTab,
+  type SplitDirection,
+  type SplitNode,
 } from "./store";
 import {
   TERM_FONT_MAX,
@@ -91,20 +101,343 @@ const TAB_GAP = 4;
 /** 「更多」按钮未渲染时的宽度估算值 */
 const MORE_FALLBACK_WIDTH = 74;
 
-/** 平铺展示的标签：当前打开的会话若被收起，会占用最后一个平铺位，保证始终可见 */
+/** 当前活动标签：包含当前聚焦会话的标签（合并组整体算一个标签） */
+const activeTab = computed(
+  () =>
+    tabs.value.find((t) => t.sessions.some((s) => s.id === activeId.value)) ?? tabs.value[0],
+);
+
+/** 平铺展示的标签：当前活动标签若被收起，会占用最后一个平铺位，保证始终可见 */
 const visibleTabs = computed(() => {
-  const list = sessions.value;
+  const list = tabs.value;
   if (!tabsOverflow.value) return list.slice(0, visibleTabCount.value);
   const shown = list.slice(0, visibleTabCount.value);
-  const active = list.find((s) => s.id === activeId.value);
-  if (!active || shown.some((s) => s.id === active.id)) return shown;
+  const active = activeTab.value;
+  if (!active || shown.some((t) => t.key === active.key)) return shown;
   return shown.length ? [...shown.slice(0, -1), active] : [active];
 });
-/** 收进「更多」浮层的会话（不含当前打开的会话） */
+/** 收进「更多」浮层的会话（含合并组里的会话） */
 const hiddenSessions = computed(() => {
-  const shown = new Set(visibleTabs.value.map((s) => s.id));
+  const shown = new Set(visibleTabs.value.flatMap((t) => t.sessions.map((s) => s.id)));
   return sessions.value.filter((s) => !shown.has(s.id));
 });
+
+/** 标签主标题：合并组显示为「工作组」，数量由角标显示 */
+function tabLabel(t: SessionTab): string {
+  return t.group ? "工作组" : sessionLabel(t.sessions[0]);
+}
+
+/** 标签悬浮提示：列出组内全部服务器 */
+function tabTitle(t: SessionTab): string {
+  return t.sessions
+    .map((s) => `${sessionLabel(s)} · ${s.user}@${s.host}:${s.port}`)
+    .join("\n");
+}
+
+/** 标签状态点：优先显示最严重的状态 */
+function tabStatus(t: SessionTab): string {
+  const statuses = t.sessions.map((s) => s.status);
+  if (statuses.includes("error")) return "error";
+  if (statuses.includes("connecting")) return "connecting";
+  if (statuses.every((s) => s === "connected")) return "connected";
+  return "closed";
+}
+
+/** 拖拽来源：顶部标签，或分屏里的某个终端面板 */
+interface DragState {
+  kind: "tab" | "pane";
+  tab?: SessionTab;
+  paneId?: string;
+  startX: number;
+  startY: number;
+  moved: boolean;
+}
+
+/** 终端容器，用于把面板位置换算成预览用的百分比坐标 */
+const terminalsEl = ref<HTMLElement>();
+/** 拖拽状态：不用响应式，只在指针事件里读写 */
+let dragState: DragState | null = null;
+/** 正在拖拽的标签 key，用于标签的拖动样式 */
+const dragTabKey = ref<string | null>(null);
+/** 松手会落在哪个标签上：交换位置 */
+const dropTabKey = ref<string | null>(null);
+/** 松手会落在哪个终端面板上：分屏 */
+const dropPlan = ref<{ targetId: string; direction: SplitDirection; before: boolean } | null>(null);
+/** 拖拽面板标题栏时是否停在顶部标签栏上方（脱组） */
+const paneDropActive = ref(false);
+/** 拖拽真正开始后，压住紧随其后的 click */
+let suppressClick = false;
+
+/** 指针按下开始拖拽；移动超过阈值才算真正拖起来 */
+function beginDrag(e: PointerEvent, init: Pick<DragState, "kind" | "tab" | "paneId">) {
+  if (e.button !== 0) return;
+  endDrag();
+  dragState = { ...init, startX: e.clientX, startY: e.clientY, moved: false };
+  dragTabKey.value = init.kind === "tab" ? (init.tab?.key ?? null) : null;
+  suppressClick = false;
+  window.addEventListener("pointermove", onDragMove);
+  window.addEventListener("pointerup", onDragUp);
+  window.addEventListener("pointercancel", endDrag);
+}
+
+/** 拖动顶部标签：落在另一个标签上交换位置，落在终端面板上分屏 */
+function onTabPointerDown(e: PointerEvent, t: SessionTab) {
+  if ((e.target as HTMLElement).closest(".x")) return;
+  beginDrag(e, { kind: "tab", tab: t });
+}
+
+/** 拖动分屏面板标题栏：落在顶部标签栏即脱离工作组 */
+function onPanePointerDown(id: string, e: PointerEvent) {
+  beginDrag(e, { kind: "pane", paneId: id });
+}
+
+function onDragMove(e: PointerEvent) {
+  const st = dragState;
+  if (!st) return;
+  if (!st.moved) {
+    if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) < 4) return;
+    st.moved = true;
+    document.body.style.userSelect = "none";
+  }
+  e.preventDefault();
+  const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+
+  if (st.kind === "pane") {
+    paneDropActive.value = !!hit?.closest(".tb-sessions");
+    return;
+  }
+
+  const tabEl = hit?.closest("[data-tab-key]") as HTMLElement | null;
+  if (tabEl && tabEl.dataset.tabKey !== st.tab?.key) {
+    dropTabKey.value = tabEl.dataset.tabKey ?? null;
+    dropPlan.value = null;
+    splitPreview.value = null;
+    return;
+  }
+  dropTabKey.value = null;
+
+  const paneEl = hit?.closest("[data-pane-id]") as HTMLElement | null;
+  const targetId = paneEl?.dataset.paneId;
+  if (!paneEl || !targetId) {
+    dropPlan.value = null;
+    splitPreview.value = null;
+    return;
+  }
+  const geo = dropSplitAt(e.clientX, e.clientY, paneEl);
+  dropPlan.value = { targetId, ...geo };
+  splitPreview.value = { ...geo, rect: previewRect(paneEl, geo) };
+}
+
+/** 终端面板区域（相对终端容器的百分比坐标） */
+interface PaneRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 拖入终端区域时的分屏落点预览 */
+const splitPreview = ref<{
+  direction: SplitDirection;
+  before: boolean;
+  rect: PaneRect;
+} | null>(null);
+
+/** 根据落点在目标面板内的位置判断分屏方向：靠近左右 => 左右分屏，靠近上下 => 上下分屏 */
+function dropSplitAt(x: number, y: number, el: HTMLElement) {
+  const rect = el.getBoundingClientRect();
+  const fx = (x - rect.left) / Math.max(rect.width, 1);
+  const fy = (y - rect.top) / Math.max(rect.height, 1);
+  const horizontal = Math.abs(fx - 0.5) >= Math.abs(fy - 0.5);
+  return horizontal
+    ? { direction: "row" as const, before: fx < 0.5 }
+    : { direction: "column" as const, before: fy < 0.5 };
+}
+
+/** 目标面板里将要分出去的那一半，换算成相对终端容器的百分比 */
+function previewRect(
+  pane: HTMLElement,
+  geo: { direction: SplitDirection; before: boolean },
+): PaneRect {
+  const full = terminalsEl.value?.getBoundingClientRect();
+  if (!full || !full.width || !full.height) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const box = pane.getBoundingClientRect();
+  const left = ((box.left - full.left) / full.width) * 100;
+  const top = ((box.top - full.top) / full.height) * 100;
+  const width = (box.width / full.width) * 100;
+  const height = (box.height / full.height) * 100;
+  // 预览只覆盖目标面板的一半，让用户清楚新终端会插到哪里
+  return geo.direction === "row"
+    ? { left: geo.before ? left : left + width / 2, top, width: width / 2, height }
+    : { left, top: geo.before ? top : top + height / 2, width, height: height / 2 };
+}
+
+/** 结束拖拽并清空全部落点状态 */
+function endDrag() {
+  dragState = null;
+  dragTabKey.value = null;
+  dropTabKey.value = null;
+  dropPlan.value = null;
+  paneDropActive.value = false;
+  splitPreview.value = null;
+  document.body.style.userSelect = "";
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", onDragUp);
+  window.removeEventListener("pointercancel", endDrag);
+}
+
+/** 松手：按当前落点执行交换标签 / 分屏 / 脱组 */
+function onDragUp() {
+  const st = dragState;
+  if (!st) return;
+  const tabKey = dropTabKey.value;
+  const plan = dropPlan.value;
+  const paneDrop = paneDropActive.value;
+  const moved = st.moved;
+  endDrag();
+  if (!moved) return;
+  suppressClick = true;
+
+  if (st.kind === "pane") {
+    if (!paneDrop || !st.paneId) return;
+    detachFromGroup(st.paneId);
+    activeId.value = st.paneId;
+    page.value = "term";
+    return;
+  }
+  const source = st.tab;
+  if (!source) return;
+  if (tabKey) {
+    const target = tabs.value.find((t) => t.key === tabKey);
+    if (target && target.key !== source.key) {
+      swapTabs(
+        source.sessions.map((s) => s.id),
+        target.sessions.map((s) => s.id),
+      );
+    }
+    return;
+  }
+  if (!plan) return;
+  const merged = mergeIntoPane(
+    source.sessions.map((s) => s.id),
+    plan.targetId,
+    plan.direction,
+    plan.before,
+  );
+  if (merged.length > 1) {
+    activeId.value = plan.targetId;
+    page.value = "term";
+  }
+}
+
+/** 点击标签：拖拽刚结束时吞掉紧随其后的 click */
+function onTabClick(t: SessionTab) {
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
+  openTab(t);
+}
+
+/** 落点预览的定位样式 */
+const previewStyle = computed(() => {
+  const p = splitPreview.value;
+  if (!p) return {};
+  return {
+    left: `${p.rect.left}%`,
+    top: `${p.rect.top}%`,
+    width: `${p.rect.width}%`,
+    height: `${p.rect.height}%`,
+  };
+});
+
+/** 点击标签：打开对应终端（合并组打开第一个面板） */
+function openTab(t: SessionTab) {
+  activeId.value = t.sessions[0].id;
+  page.value = "term";
+}
+
+/** 关闭标签：合并组会断开组内全部会话 */
+function closeTab(t: SessionTab) {
+  t.sessions.forEach((s) => closeSession(s.id));
+}
+
+/** 当前标签内是否显示该终端面板 */
+function isPaneVisible(id: string): boolean {
+  return activeTab.value?.sessions.some((s) => s.id === id) ?? false;
+}
+
+/** 拆分当前合并标签，恢复为各自独立的终端 */
+function splitActiveTab() {
+  const t = activeTab.value;
+  if (!t || !t.group) return;
+  splitGroup(t.sessions[0].id);
+  activeId.value = t.sessions[0].id;
+}
+
+/** 递归平分布局树，得到每个终端面板的百分比区域 */
+function collectRects(node: SplitNode, rect: PaneRect, out: Map<string, PaneRect>) {
+  if (node.type === "leaf") {
+    out.set(node.id, rect);
+    return;
+  }
+  const n = node.children.length || 1;
+  node.children.forEach((child, i) => {
+    if (node.direction === "row") {
+      const width = rect.width / n;
+      collectRects(
+        child,
+        { left: rect.left + width * i, top: rect.top, width, height: rect.height },
+        out,
+      );
+    } else {
+      const height = rect.height / n;
+      collectRects(
+        child,
+        { left: rect.left, top: rect.top + height * i, width: rect.width, height },
+        out,
+      );
+    }
+  });
+}
+
+/** 当前工作组内各终端面板的位置：嵌套分屏只影响被拖入的那个面板 */
+const paneRects = computed(() => {
+  const out = new Map<string, PaneRect>();
+  const t = activeTab.value;
+  if (!t) return out;
+  const group = splitGroupOf(t.sessions[0].id);
+  if (!group) {
+    out.set(t.sessions[0].id, { left: 0, top: 0, width: 100, height: 100 });
+    return out;
+  }
+  collectRects(group.layout, { left: 0, top: 0, width: 100, height: 100 }, out);
+  return out;
+});
+
+/** 单个终端面板的定位样式，不在当前标签内的面板隐藏 */
+function paneStyle(id: string): Record<string, string> {
+  const rect = paneRects.value.get(id);
+  if (!rect) return { display: "none" };
+  return {
+    left: `${rect.left}%`,
+    top: `${rect.top}%`,
+    width: `${rect.width}%`,
+    height: `${rect.height}%`,
+  };
+}
+
+/** 当前标签是否处于合并分屏状态 */
+const mergedLayout = computed(() => (activeTab.value?.sessions.length ?? 1) > 1);
+
+/** 工作组成员信息，用于工具栏悬浮提示 */
+const groupMembersTitle = computed(() =>
+  (activeTab.value?.sessions ?? [])
+    .map((s) => `${sessionLabel(s)} · ${s.user}@${s.host}:${s.port}`)
+    .join("\n"),
+);
 
 /** 计算能放下多少个标签，剩余部分收进「更多」按钮 */
 function updateTabsOverflow() {
@@ -129,8 +462,10 @@ function updateTabsOverflow() {
     return;
   }
 
-  // 逐个累加标签宽度；当前会话在收起列表里时，最后一个平铺位留给它
-  const activeIdx = sessions.value.findIndex((s) => s.id === activeId.value);
+  // 逐个累加标签宽度；当前活动标签在收起列表里时，最后一个平铺位留给它
+  const activeIdx = tabs.value.findIndex((t) =>
+    t.sessions.some((s) => s.id === activeId.value),
+  );
   const moreWidth = moreBtnEl.value?.offsetWidth ?? MORE_FALLBACK_WIDTH;
   let prefix = 0;
   let count = 0;
@@ -153,9 +488,12 @@ function updateTabsOverflow() {
   if (!wasOverflow) void nextTick(updateTabsOverflow);
 }
 
-/** 会话增删或重命名后重新评估标签是否放得下 */
+/** 标签合并、增删或重命名后重新评估标签是否放得下 */
 watch(
-  () => sessions.value.map((s) => sessionLabel(s)).join("|"),
+  () =>
+    tabs.value
+      .map((t) => `${t.key}:${t.sessions.map((s) => sessionLabel(s)).join("/")}`)
+      .join("|"),
   () => void nextTick(updateTabsOverflow),
 );
 
@@ -670,20 +1008,29 @@ function closeSession(id: string) {
         v-if="sessions.length"
         ref="sessionsEl"
         class="tb-sessions"
+        :class="{ 'pane-drop': paneDropActive }"
         style="--wails-draggable: no-drag"
       >
         <div v-if="visibleTabs.length" class="tb-tabs">
           <button
-            v-for="s in visibleTabs"
-            :key="s.id"
+            v-for="t in visibleTabs"
+            :key="t.key"
             class="tb-tab"
-            :class="{ on: page === 'term' && s.id === activeId }"
-            :title="`${sessionLabel(s)} · ${s.user}@${s.host}:${s.port}`"
-            @click="openSession(s.id)"
+            :class="{
+              on: page === 'term' && t.key === activeTab?.key,
+              drop: dropTabKey === t.key,
+              dragging: dragTabKey === t.key,
+            }"
+            :title="tabTitle(t)"
+            @pointerdown="onTabPointerDown($event, t)"
+            @click="onTabClick(t)"
           >
-            <span class="dot" :class="s.status" />
-            <span class="tb-tab-label">{{ sessionLabel(s) }}</span>
-            <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
+            <span class="dot" :class="tabStatus(t)" />
+            <span v-if="t.group" class="tb-group" :title="`${t.sessions.length} 个终端并排显示`">
+              {{ t.sessions.length }}
+            </span>
+            <span class="tb-tab-label">{{ tabLabel(t) }}</span>
+            <span class="x" title="断开" @click.stop="closeTab(t)">×</span>
           </button>
         </div>
 
@@ -732,9 +1079,10 @@ function closeSession(id: string) {
 
         <!-- 隐藏副本：不参与布局，仅用于测量全部标签的自然宽度 -->
         <div ref="tabsGhostEl" class="tb-tabs tb-tabs-ghost" aria-hidden="true">
-          <button v-for="s in sessions" :key="s.id" class="tb-tab" tabindex="-1">
-            <span class="dot" :class="s.status" />
-            <span class="tb-tab-label">{{ sessionLabel(s) }}</span>
+          <button v-for="t in tabs" :key="t.key" class="tb-tab" tabindex="-1">
+            <span class="dot" :class="tabStatus(t)" />
+            <span v-if="t.group" class="tb-group">{{ t.sessions.length }}</span>
+            <span class="tb-tab-label">{{ tabLabel(t) }}</span>
             <span class="x">×</span>
           </button>
         </div>
@@ -1151,14 +1499,60 @@ function closeSession(id: string) {
       </section>
 
       <section v-show="page === 'term'" class="term-view">
-        <div class="terminals">
-          <TerminalPane
+        <!-- 合并分屏工具栏：同步输入只影响当前合并组 -->
+        <div v-if="mergedLayout" class="term-toolbar">
+          <span class="tt-info" :title="groupMembersTitle">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="2" y="3" width="5" height="10" rx="1.2" />
+              <rect x="9" y="3" width="5" height="10" rx="1.2" />
+            </svg>
+            工作组
+            <span class="tt-count">{{ activeTab?.sessions.length }} 个终端</span>
+          </span>
+          <button
+            class="tt-btn"
+            :class="{ on: splitSync }"
+            :title="splitSync ? '输入会同步到同组其他终端' : '输入只发送到当前终端'"
+            @click="splitSync = !splitSync"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2.4 8h11.2" />
+              <path d="M5.2 5.2L2.4 8l2.8 2.8" />
+              <path d="M10.8 5.2L13.6 8l-2.8 2.8" />
+            </svg>
+            同步输入
+          </button>
+          <button class="tt-btn" title="把合并的终端拆回独立标签" @click="splitActiveTab">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 2.4v11.2" />
+              <path d="M4 3l-2.4 2.4L4 7.8" />
+              <path d="M12 3l2.4 2.4L12 7.8" />
+            </svg>
+            拆分窗口
+          </button>
+          <span class="tt-hint">拖动终端标题可拖回顶部标签栏</span>
+        </div>
+        <div ref="terminalsEl" class="terminals" :class="{ merged: mergedLayout }">
+          <!-- 落点预览：只覆盖目标面板将要分出去的那一半 -->
+          <div v-if="splitPreview" class="split-preview" :style="previewStyle">
+            <span>{{ splitPreview.direction === "row" ? "左右分屏" : "上下分屏" }}</span>
+          </div>
+          <div
             v-for="s in sessions"
             :key="s.id"
-            :session="s"
-            :visible="page === 'term' && s.id === activeId"
-            @activate="activeId = $event"
-          />
+            class="pane-slot"
+            :data-pane-id="s.id"
+            :style="paneStyle(s.id)"
+          >
+            <TerminalPane
+              :session="s"
+              :visible="page === 'term' && isPaneVisible(s.id)"
+              :merged="mergedLayout"
+              @activate="activeId = $event"
+              @close="closeSession(s.id)"
+              @pane-drag-start="onPanePointerDown"
+            />
+          </div>
         </div>
       </section>
 
@@ -1792,6 +2186,13 @@ function closeSession(id: string) {
   flex: 0 1 auto;
   min-width: 0;
 }
+/* 从分屏拖回顶部标签栏时的落点提示 */
+.tb-sessions.pane-drop {
+  outline: 1px dashed var(--win-accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+  background: var(--win-accent-soft);
+}
 .tb-tabs {
   display: flex;
   align-items: center;
@@ -1823,6 +2224,7 @@ function closeSession(id: string) {
   color: var(--win-text-2);
   font-size: 12.5px;
   cursor: default;
+  user-select: none;
 }
 .tb-tab:hover {
   background: var(--win-fill-hover);
@@ -1853,6 +2255,30 @@ function closeSession(id: string) {
 .tb-tab .x:hover {
   background: var(--win-fill-press);
   color: var(--win-err);
+}
+/* 合并组角标：显示并排显示的终端数量 */
+.tb-group {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* 拖动合并标签的视觉反馈 */
+.tb-tab.dragging {
+  opacity: 0.55;
+}
+.tb-tab.drop {
+  background: var(--win-accent-soft);
+  border-color: var(--win-accent);
+  color: var(--win-text);
 }
 .tb-session-btn {
   gap: 7px;
@@ -2616,8 +3042,114 @@ function closeSession(id: string) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
-.terminals > :deep(.pane) {
+/* 合并分屏：1px 缝隙透出描边色，形成分隔线 */
+.terminals.merged {
+  background: var(--win-stroke);
+}
+.pane-slot {
+  position: absolute;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+/* 合并时每个面板留出 1px 间隙，嵌套分屏也只会影响自己所在的区域 */
+.terminals.merged .pane-slot {
+  padding: 0 1px 1px 0;
+}
+.pane-slot > :deep(.pane) {
+  width: 100%;
   height: 100%;
+}
+/* 拖拽落点预览：覆盖目标面板将要分出去的那一半 */
+.split-preview {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--win-accent);
+  background: var(--win-accent-soft);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: all 0.08s ease-out;
+}
+.split-preview > span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--win-accent);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+/* 合并分屏顶部工具栏 */
+.term-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--win-stroke);
+  background: var(--win-chrome);
+  color: var(--win-text-2);
+  font-size: 12px;
+}
+.term-toolbar .tt-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--win-text);
+  font-weight: 600;
+}
+/* 工作组成员数量角标 */
+.term-toolbar .tt-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--win-fill);
+  color: var(--win-text-3);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+/* 工具栏右侧操作提示 */
+.term-toolbar .tt-hint {
+  margin-left: auto;
+  color: var(--win-text-3);
+  font-size: 11.5px;
+}
+.term-toolbar svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.term-toolbar .tt-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 7px;
+  background: var(--win-fill);
+  color: var(--win-text-2);
+  font-size: 12px;
+  cursor: default;
+}
+.term-toolbar .tt-btn:hover {
+  background: var(--win-fill-hover);
+  border-color: var(--win-stroke-strong);
+  color: var(--win-text);
+}
+.term-toolbar .tt-btn.on {
+  background: var(--win-accent-soft);
+  border-color: var(--win-accent);
+  color: var(--win-accent);
 }
 </style>

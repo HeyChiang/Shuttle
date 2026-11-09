@@ -21,9 +21,15 @@ const props = defineProps<{
   session: SessionInfo;
   /** 网格模式下是否可见；单窗口模式下由 activeId 决定 */
   visible: boolean;
+  /** 是否处于合并分屏：显示终端标题栏，可拖回顶部标签栏脱组 */
+  merged?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: "activate", id: string): void }>();
+const emit = defineEmits<{
+  (e: "activate", id: string): void;
+  (e: "close"): void;
+  (e: "pane-drag-start", id: string, ev: PointerEvent): void;
+}>();
 
 const paneEl = ref<HTMLDivElement>();
 const bodyEl = ref<HTMLDivElement>();
@@ -129,6 +135,14 @@ function doFit() {
 function activate() {
   activeId.value = props.session.id;
   emit("activate", props.session.id);
+}
+
+/** 拖动终端标题栏：松手到顶部标签栏即可脱离工作组 */
+function onHeadPointerDown(e: PointerEvent) {
+  if (!props.merged) return;
+  if (e.button !== 0) return;
+  if ((e.target as HTMLElement).closest(".pane-close")) return;
+  emit("pane-drag-start", props.session.id, e);
 }
 
 /** 复制当前选中文本到系统剪贴板 */
@@ -283,6 +297,25 @@ function focus() {
     :style="{ display: visible ? 'flex' : 'none' }"
     @mousedown="activate"
   >
+    <!-- 分屏时的终端标题栏：显示身份，可拖回顶部标签栏脱离工作组 -->
+    <header
+      v-if="merged"
+      class="pane-head"
+      @pointerdown="onHeadPointerDown"
+    >
+      <span class="pane-dot" :class="session.status" />
+      <span class="pane-name">{{ session.name }}</span>
+      <span class="pane-host">{{ session.user }}@{{ session.host }}:{{ session.port }}</span>
+      <button
+        class="pane-close"
+        title="关闭此终端"
+        draggable="false"
+        @mousedown.stop
+        @click.stop="emit('close')"
+      >
+        ×
+      </button>
+    </header>
     <div ref="paneEl" class="pane-body" @click="activate" @contextmenu.capture="onContextMenu">
       <div ref="bodyEl" class="term" />
       <div v-if="!connected" class="overlay" @click.stop>
@@ -307,6 +340,88 @@ function focus() {
   min-height: 0;
   background: var(--win-term);
   overflow: hidden;
+}
+/* 分屏终端标题栏 */
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--win-stroke);
+  background: var(--win-chrome);
+  color: var(--win-text-2);
+  font-size: 12px;
+  user-select: none;
+  cursor: grab;
+}
+.pane-head:active {
+  cursor: grabbing;
+}
+.pane-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--win-text-3);
+}
+.pane-dot.connected {
+  background: var(--win-ok);
+}
+.pane-dot.connecting {
+  background: var(--win-warn);
+}
+.pane-dot.error {
+  background: var(--win-err);
+}
+.pane-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--win-text);
+  font-weight: 600;
+}
+.pane-host {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--win-text-3);
+  font-family: var(--win-mono);
+  font-size: 11px;
+}
+/* 鼠标进入终端区域后显示右上角关闭按钮 */
+.pane-close {
+  flex: none;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--win-text-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.pane:hover .pane-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pane-close:hover {
+  background: var(--win-fill-press);
+  color: var(--win-err);
 }
 .pane-body {
   position: relative;
