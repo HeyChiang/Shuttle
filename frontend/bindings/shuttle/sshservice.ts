@@ -17,6 +17,14 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as sshcore$0 from "./internal/sshcore/models.js";
 
 /**
+ * CancelImport drops a pending encrypted import when the user cancels the
+ * password prompt.
+ */
+export function CancelImport(): $CancellablePromise<void> {
+    return $Call.ByID(1679616320);
+}
+
+/**
  * Connect opens a session. The frontend supplies cfg.SessionID so it can route
  * the terminal output before the connection is established.
  */
@@ -62,19 +70,21 @@ export function Exec(ids: string[] | null, command: string): $CancellablePromise
 
 /**
  * ExportHosts writes every saved profile to a JSON file chosen by the user.
- * The exported file contains decrypted credentials; the UI warns about this
- * before calling.
+ * Credentials are encrypted only when a passphrase is supplied; otherwise the
+ * file is plain JSON, matching the legacy import format.
  */
-export function ExportHosts(): $CancellablePromise<string> {
-    return $Call.ByID(1404015724);
+export function ExportHosts(passphrase: string): $CancellablePromise<string> {
+    return $Call.ByID(1404015724, passphrase);
 }
 
 /**
- * ImportHosts reads profiles from a JSON file chosen by the user. The profiles
- * are not persisted here: the caller merges them into the current list.
+ * ImportHosts reads profiles from a JSON file chosen by the user. Encrypted
+ * files need a passphrase; when it is missing the selected path is kept so the
+ * next call (after the user types the password) does not reopen the file picker.
+ * The profiles are not persisted here: the caller merges them into the list.
  */
-export function ImportHosts(): $CancellablePromise<sshcore$0.HostConfig[] | null> {
-    return $Call.ByID(290546385);
+export function ImportHosts(passphrase: string): $CancellablePromise<sshcore$0.HostConfig[] | null> {
+    return $Call.ByID(290546385, passphrase);
 }
 
 /**

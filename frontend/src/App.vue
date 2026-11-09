@@ -54,6 +54,10 @@ const sessionMenuOpen = ref(false);
 /** 左侧栏设置入口 */
 const settingsOpen = ref(false);
 const settingsMaskEl = ref<HTMLElement>();
+/** 设置左栏选中项：导入、导出与主题、字号 */
+const settingsTab = ref<"import" | "export" | "theme" | "font">("import");
+/** 「外观」二级菜单是否展开 */
+const appearanceOpen = ref(true);
 /** 主题选项：跟随系统 / 浅色 / 深色 */
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: "system", label: "跟随系统" },
@@ -172,7 +176,6 @@ watch(
 /** 点击页面空白处收起浮层 */
 function closePopups() {
   hostMenu.value = null;
-  railMenu.value = null;
   sessionMenuOpen.value = false;
   settingsOpen.value = false;
   if (!searchOpen.value) return;
@@ -373,50 +376,135 @@ function showNotice(text: string) {
   }, 3600);
 }
 
-/** 导出确认弹窗：导出文件包含明文凭据，先提示用户 */
-const exportConfirmOpen = ref(false);
-const exportConfirmEl = ref<HTMLElement>();
+/** 导入 / 导出密码弹窗：仅在加密导出或导入加密文件时出现 */
+const transferMode = ref<"import" | "export" | null>(null);
+const transferPassword = ref("");
+const transferConfirm = ref("");
+const transferError = ref("");
+const transferMaskEl = ref<HTMLElement>();
 
-async function askExportHosts() {
-  if (!hosts.value.length) return;
-  exportConfirmOpen.value = true;
+async function openTransfer(mode: "import" | "export") {
+  transferMode.value = mode;
+  transferPassword.value = "";
+  transferConfirm.value = "";
+  transferError.value = "";
   await nextTick();
-  exportConfirmEl.value?.focus();
+  transferMaskEl.value?.focus();
 }
 
-async function exportHosts() {
-  exportConfirmOpen.value = false;
+function resetTransfer() {
+  transferMode.value = null;
+  transferPassword.value = "";
+  transferConfirm.value = "";
+  transferError.value = "";
+}
+
+/** 取消密码输入；加密导入还需让后端丢弃暂存的文件路径。 */
+function closeTransfer() {
+  if (transferMode.value === "import") void SSH.CancelImport();
+  resetTransfer();
+}
+
+/** 直接导出明文 JSON；加密是可选项，只有主动点击加密导出才会输入密码。 */
+async function askExportHosts() {
+  if (!hosts.value.length) {
+    showNotice("还没有可导出的主机");
+    return;
+  }
   try {
-    const path = await SSH.ExportHosts();
+    const path = await SSH.ExportHosts("");
     if (path) showNotice(`已导出到 ${path}`);
   } catch (e) {
     showNotice(String(e));
   }
 }
 
-/** 导入主机：按 user@host:port 去重后追加到现有列表 */
-async function importHosts() {
+/** 加密导出：为文件中的凭据额外设置密码。 */
+function askEncryptedExport() {
+  if (!hosts.value.length) {
+    showNotice("还没有可导出的主机");
+    return;
+  }
+  void openTransfer("export");
+}
+
+/** 导入主机：明文文件直接导入，加密文件再询问密码。 */
+async function askImportHosts() {
   try {
-    const list = (await SSH.ImportHosts()) ?? [];
-    const exists = new Set(hosts.value.map((h) => `${h.user}@${h.host}:${h.port}`));
-    const added: HostConfig[] = [];
-    for (const item of list) {
-      if (!item?.host) continue;
-      const key = `${item.user}@${item.host}:${item.port}`;
-      if (exists.has(key)) continue;
-      exists.add(key);
-      // 重新生成 id，避免与现有档案冲突。
-      added.push({ ...blankHost(), ...item, id: newSessionId(), sessionId: "" });
-    }
-    if (!added.length) {
-      showNotice(list.length ? "导入完成：没有新增主机（均已存在）" : "文件里没有主机配置");
+    await finishImport("");
+  } catch (e) {
+    // 后端已记住所选文件，输入密码后无需重新选择。
+    if (String(e).includes("已加密")) {
+      void openTransfer("import");
       return;
     }
-    await persistHosts([...hosts.value, ...added]);
-    showNotice(`已导入 ${added.length} 台主机`);
-  } catch (e) {
     showNotice(String(e));
   }
+}
+
+function submitTransfer() {
+  if (transferMode.value === "export") void exportHosts();
+  else if (transferMode.value === "import") void submitImport();
+}
+
+async function exportHosts() {
+  const password = transferPassword.value;
+  if (!password) {
+    transferError.value = "请输入加密密码";
+    return;
+  }
+  if (password !== transferConfirm.value) {
+    transferError.value = "两次输入的密码不一致";
+    return;
+  }
+  try {
+    const path = await SSH.ExportHosts(password);
+    resetTransfer();
+    if (path) showNotice(`已导出到 ${path}`);
+  } catch (e) {
+    transferError.value = String(e);
+  }
+}
+
+async function submitImport() {
+  if (!transferPassword.value) {
+    transferError.value = "请输入文件密码";
+    return;
+  }
+  try {
+    await finishImport(transferPassword.value);
+  } catch (e) {
+    // 密码错误等失败保留弹窗，方便直接修改后重试。
+    transferError.value = String(e);
+  }
+}
+
+/** 导入主机：按 user@host:port 去重后追加到现有列表 */
+async function finishImport(password: string) {
+  const list = await SSH.ImportHosts(password);
+  // 取消文件选择时后端返回 null，视为放弃导入。
+  if (!list) {
+    resetTransfer();
+    return;
+  }
+  const exists = new Set(hosts.value.map((h) => `${h.user}@${h.host}:${h.port}`));
+  const added: HostConfig[] = [];
+  for (const item of list) {
+    if (!item?.host) continue;
+    const key = `${item.user}@${item.host}:${item.port}`;
+    if (exists.has(key)) continue;
+    exists.add(key);
+    // 重新生成 id，避免与现有档案冲突。
+    added.push({ ...blankHost(), ...item, id: newSessionId(), sessionId: "" });
+  }
+  if (!added.length) {
+    resetTransfer();
+    showNotice(list.length ? "导入完成：没有新增主机（均已存在）" : "文件里没有主机配置");
+    return;
+  }
+  await persistHosts([...hosts.value, ...added]);
+  resetTransfer();
+  showNotice(`已导入 ${added.length} 台主机`);
 }
 
 // ---------------------------------------------------------------- 代码块
@@ -478,35 +566,6 @@ function snippetLines(code: string): number {
 function connectHost(host: HostConfig) {
   page.value = "term";
   void connect(host);
-}
-
-/** 左侧「主机」项旁的导入 / 导出菜单 */
-const railMenu = ref<{ left: number; top: number } | null>(null);
-const railMenuEl = ref<HTMLElement>();
-
-/** 在「主机」导航项右侧弹出导入导出菜单 */
-async function toggleRailMenu(e: MouseEvent) {
-  if (railMenu.value) {
-    railMenu.value = null;
-    return;
-  }
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  let left = rect.right + 6;
-  let top = rect.top;
-  railMenu.value = { left, top };
-  await nextTick();
-  const el = railMenuEl.value;
-  if (!el || !railMenu.value) return;
-  const menu = el.getBoundingClientRect();
-  left = Math.max(8, Math.min(left, window.innerWidth - menu.width - 8));
-  top = Math.max(8, Math.min(top, window.innerHeight - menu.height - 8));
-  railMenu.value = { left, top };
-}
-
-function runRailAction(action: "import" | "export") {
-  railMenu.value = null;
-  if (action === "import") void importHosts();
-  else void askExportHosts();
 }
 
 /** 主页卡片操作菜单：当前主机 + 相对视口的坐标 */
@@ -753,34 +812,19 @@ function closeSession(id: string) {
       style="--wails-draggable: no-drag"
     >
       <nav class="rail-list">
-        <div class="rail-host">
-          <button
-            class="rail-item"
-            :class="{ on: page === 'home' }"
-            title="主机"
-            @click="page = 'home'"
-          >
-            <svg viewBox="0 0 20 20">
-              <rect x="3.2" y="3.6" width="13.6" height="5.4" rx="1.4" />
-              <rect x="3.2" y="11" width="13.6" height="5.4" rx="1.4" />
-              <path d="M6.2 6.3h2.2M6.2 13.7h2.2" />
-            </svg>
-            <span>主机</span>
-          </button>
-          <button
-            class="rail-more"
-            :class="{ on: railMenu }"
-            title="导入 / 导出主机配置"
-            aria-label="导入或导出主机配置"
-            @click.stop="toggleRailMenu"
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="3.2" cy="8" r="1.15" />
-              <circle cx="8" cy="8" r="1.15" />
-              <circle cx="12.8" cy="8" r="1.15" />
-            </svg>
-          </button>
-        </div>
+        <button
+          class="rail-item"
+          :class="{ on: page === 'home' }"
+          title="主机"
+          @click="page = 'home'"
+        >
+          <svg viewBox="0 0 20 20">
+            <rect x="3.2" y="3.6" width="13.6" height="5.4" rx="1.4" />
+            <rect x="3.2" y="11" width="13.6" height="5.4" rx="1.4" />
+            <path d="M6.2 6.3h2.2M6.2 13.7h2.2" />
+          </svg>
+          <span>主机</span>
+        </button>
 
         <button
           class="rail-item"
@@ -831,41 +875,129 @@ function closeSession(id: string) {
             <button class="settings-close" title="关闭" @click="settingsOpen = false">×</button>
           </header>
 
-          <div class="settings-body">
-            <div class="set-group">
-              <span class="set-label">外观</span>
-              <div class="set-seg">
-                <button
-                  v-for="opt in themeOptions"
-                  :key="opt.value"
-                  :class="{ on: themeMode === opt.value }"
-                  @click="themeMode = opt.value"
-                >
-                  {{ opt.label }}
+          <div class="settings-main">
+            <nav class="settings-nav">
+              <button
+                class="settings-nav-item"
+                :class="{ on: settingsTab === 'import' }"
+                @click="settingsTab = 'import'"
+              >
+                <svg viewBox="0 0 16 16">
+                  <path d="M8 2.4v7.4M5.2 6.9L8 9.7l2.8-2.8" />
+                  <path d="M3.2 11.6v1.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1v-1.4" />
+                </svg>
+                <span>导入</span>
+              </button>
+
+              <button
+                class="settings-nav-item"
+                :class="{ on: settingsTab === 'export' }"
+                @click="settingsTab = 'export'"
+              >
+                <svg viewBox="0 0 16 16">
+                  <path d="M8 10.8V3.4M5.2 6.2L8 3.4l2.8 2.8" />
+                  <path d="M3.2 11.6v1.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1v-1.4" />
+                </svg>
+                <span>导出</span>
+              </button>
+
+              <button
+                class="settings-nav-item"
+                :class="{ on: settingsTab === 'theme' || settingsTab === 'font' }"
+                @click="appearanceOpen = !appearanceOpen"
+              >
+                <svg viewBox="0 0 20 20">
+                  <circle cx="10" cy="10" r="3.1" />
+                  <path
+                    d="M10 2.6v1.8M10 15.6v1.8M2.6 10h1.8M15.6 10h1.8M4.8 4.8l1.3 1.3M13.9 13.9l1.3 1.3M15.2 4.8l-1.3 1.3M6.1 13.9l-1.3 1.3"
+                  />
+                </svg>
+                <span>外观</span>
+                <span class="nav-caret" :class="{ open: appearanceOpen }">›</span>
+              </button>
+
+              <div v-show="appearanceOpen" class="settings-subnav">
+                <button :class="{ on: settingsTab === 'theme' }" @click="settingsTab = 'theme'">
+                  主题
+                </button>
+                <button :class="{ on: settingsTab === 'font' }" @click="settingsTab = 'font'">
+                  终端文字大小
                 </button>
               </div>
-            </div>
+            </nav>
 
-            <div class="set-group">
-              <div class="set-row">
-                <span class="set-label">终端文字大小</span>
-                <span class="set-value">{{ termFontSize }} px</span>
-              </div>
-              <input
-                v-model.number="termFontSize"
-                class="set-range"
-                type="range"
-                :min="TERM_FONT_MIN"
-                :max="TERM_FONT_MAX"
-                step="1"
-              />
-              <span class="set-hint">仅影响 SSH 终端中的字符大小</span>
-            </div>
+            <section class="settings-content">
+              <template v-if="settingsTab === 'import'">
+                <div class="set-group">
+                  <span class="set-label">导入主机配置</span>
+                  <p class="set-desc">
+                    从 JSON 文件导入主机与登录凭据；若文件已加密，会提示输入导出时设置的密码。
+                  </p>
+                  <div class="set-btnrow">
+                    <button class="btn primary" @click="askImportHosts">导入主机</button>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else-if="settingsTab === 'export'">
+                <div class="set-group">
+                  <span class="set-label">导出主机配置</span>
+                  <p class="set-desc">
+                    导出的 JSON 包含主机与登录凭据，请妥善保管；如需保护凭据，可选用下方的加密导出。
+                  </p>
+                  <div class="set-btnrow">
+                    <button class="btn primary" :disabled="!hosts.length" @click="askExportHosts">
+                      导出主机
+                    </button>
+                  </div>
+                  <button class="set-link" :disabled="!hosts.length" @click="askEncryptedExport">
+                    加密导出（可选）
+                  </button>
+                </div>
+              </template>
+
+              <template v-else-if="settingsTab === 'theme'">
+                <div class="set-group">
+                  <span class="set-label">主题</span>
+                  <div class="set-seg">
+                    <button
+                      v-for="opt in themeOptions"
+                      :key="opt.value"
+                      :class="{ on: themeMode === opt.value }"
+                      @click="themeMode = opt.value"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="set-group">
+                  <div class="set-row">
+                    <span class="set-label">终端文字大小</span>
+                    <span class="set-value">{{ termFontSize }} px</span>
+                  </div>
+                  <input
+                    v-model.number="termFontSize"
+                    class="set-range"
+                    type="range"
+                    :min="TERM_FONT_MIN"
+                    :max="TERM_FONT_MAX"
+                    step="1"
+                  />
+                  <span class="set-hint">仅影响 SSH 终端中的字符大小</span>
+                </div>
+              </template>
+            </section>
           </div>
 
-          <footer class="settings-actions">
+          <footer
+            v-if="settingsTab === 'theme' || settingsTab === 'font'"
+            class="settings-actions"
+          >
+            <span />
             <button class="btn" @click="resetAppearance">恢复默认</button>
-            <button class="btn primary" @click="settingsOpen = false">完成</button>
           </footer>
         </div>
       </div>
@@ -945,7 +1077,7 @@ function closeSession(id: string) {
           <p>点击「新增主机」添加第一条 SSH 连接信息，或从已有配置文件导入。</p>
           <div class="empty-actions">
             <button class="btn primary" @click="openNew">新增主机</button>
-            <button class="btn" @click="importHosts">从文件导入</button>
+            <button class="btn" @click="askImportHosts">从文件导入</button>
           </div>
         </div>
         <div v-else-if="!homeSections.length" class="empty-state">
@@ -1117,33 +1249,57 @@ function closeSession(id: string) {
       </div>
     </Teleport>
 
-    <!-- 导出确认：导出文件包含明文凭据，先提示用户 -->
+    <!-- 加密相关的密码输入：仅加密导出、或导入加密文件时出现 -->
     <Teleport to="body">
       <div
-        v-if="exportConfirmOpen"
-        ref="exportConfirmEl"
+        v-if="transferMode"
+        ref="transferMaskEl"
         class="confirm-mask"
         tabindex="-1"
-        @click.self="exportConfirmOpen = false"
-        @keydown.esc="exportConfirmOpen = false"
+        @click.self="closeTransfer"
+        @keydown.esc="closeTransfer"
       >
-        <div class="confirm-dialog" role="alertdialog" aria-modal="true">
+        <div class="confirm-dialog pwd-dialog" role="dialog" aria-modal="true">
           <div class="confirm-head">
             <span class="confirm-icon warn">
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M8 2.6v7.2M5.2 7L8 9.8 10.8 7M3.2 12.4v1h9.6v-1" />
+                <path d="M5 7V5.2a3 3 0 0 1 6 0V7M3.6 7h8.8v6.2H3.6z" />
               </svg>
             </span>
             <div class="confirm-text">
-              <h3>导出主机配置</h3>
-              <p>
-                导出的 JSON 文件包含<strong>明文密码</strong>和私钥口令，请妥善保管，不要上传到公开位置。
+              <h3>{{ transferMode === "export" ? "加密导出" : "输入文件密码" }}</h3>
+              <p v-if="transferMode === 'export'">
+                设置一个密码，文件中的登录凭据会用它加密，导入时需要输入同一密码。
               </p>
+              <p v-else>该文件已加密，请输入导出时设置的密码。</p>
             </div>
           </div>
+          <div class="pwd-fields">
+            <label>
+              <span>{{ transferMode === "export" ? "加密密码" : "文件密码" }}</span>
+              <input
+                v-model="transferPassword"
+                type="password"
+                :placeholder="transferMode === 'export' ? '设置一个密码' : '输入文件密码'"
+                @keydown.enter="submitTransfer"
+              />
+            </label>
+            <label v-if="transferMode === 'export'">
+              <span>确认密码</span>
+              <input
+                v-model="transferConfirm"
+                type="password"
+                placeholder="再次输入密码"
+                @keydown.enter="submitTransfer"
+              />
+            </label>
+            <p v-if="transferError" class="pwd-error">{{ transferError }}</p>
+          </div>
           <div class="confirm-actions">
-            <button class="btn" @click="exportConfirmOpen = false">取消</button>
-            <button class="btn primary" @click="exportHosts">继续导出</button>
+            <button class="btn" @click="closeTransfer">取消</button>
+            <button class="btn primary" @click="submitTransfer">
+              {{ transferMode === "export" ? "导出" : "导入" }}
+            </button>
           </div>
         </div>
       </div>
@@ -1151,35 +1307,6 @@ function closeSession(id: string) {
 
     <!-- 导入 / 导出结果提示 -->
     <div v-if="notice" class="toast">{{ notice }}</div>
-
-    <!-- 左侧「主机」项：导入 / 导出菜单 -->
-    <Teleport to="body">
-      <div
-        v-if="railMenu"
-        ref="railMenuEl"
-        class="host-menu"
-        :style="{ left: `${railMenu.left}px`, top: `${railMenu.top}px` }"
-        @click.stop
-        @contextmenu.prevent
-      >
-        <button class="host-menu-item" @click="runRailAction('import')">
-          <svg viewBox="0 0 16 16">
-            <path d="M8 2.8v7M5.2 6.9L8 9.7l2.8-2.8M3.2 12.4v1h9.6v-1" />
-          </svg>
-          导入主机
-        </button>
-        <button
-          class="host-menu-item"
-          :disabled="!hosts.length"
-          @click="runRailAction('export')"
-        >
-          <svg viewBox="0 0 16 16">
-            <path d="M8 9.9V2.9M5.2 5.9L8 3.1l2.8 2.8M3.2 12.4v1h9.6v-1" />
-          </svg>
-          导出主机
-        </button>
-      </div>
-    </Teleport>
 
     <!-- 主页卡片操作菜单：跟随光标或「更多」按钮，统一弹在 body 上避免被卡片裁剪 -->
     <Teleport to="body">
@@ -1303,47 +1430,6 @@ function closeSession(id: string) {
 .rail-item.on svg {
   stroke: var(--win-accent);
 }
-/* 「主机」项悬停时右侧露出导入 / 导出入口 */
-.rail-host {
-  position: relative;
-}
-.rail-host .rail-item {
-  padding-right: 34px;
-}
-.rail-more {
-  position: absolute;
-  top: 50%;
-  right: 5px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--win-text-3);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%);
-  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
-}
-.rail-host:hover .rail-more,
-.rail-more:focus-visible,
-.rail-more.on {
-  opacity: 1;
-  pointer-events: auto;
-}
-.rail-more:hover {
-  background: var(--win-fill-hover);
-  color: var(--win-text);
-}
-.rail-more svg {
-  width: 15px;
-  height: 15px;
-  fill: currentColor;
-  stroke: none;
-}
 
 /* 设置弹窗：独立浮层页面，居中展示 */
 .settings-mask {
@@ -1362,7 +1448,7 @@ function closeSession(id: string) {
 .settings-dialog {
   display: flex;
   flex-direction: column;
-  width: min(420px, 92vw);
+  width: min(560px, 94vw);
   border: 1px solid var(--win-stroke-strong);
   border-radius: 14px;
   background: var(--win-flyout);
@@ -1396,11 +1482,98 @@ function closeSession(id: string) {
   background: var(--win-fill-hover);
   color: var(--win-text);
 }
-.settings-body {
+.settings-main {
+  display: flex;
+  min-height: 248px;
+}
+/* 左栏：导入 / 导出为一级菜单，外观下挂主题与字号两个二级项 */
+.settings-nav {
+  flex: none;
+  width: 152px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 2px 18px 18px;
+  gap: 2px;
+  padding: 4px 10px 16px;
+  border-right: 1px solid var(--win-stroke);
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--win-text-2);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: default;
+}
+.settings-nav-item:hover {
+  background: var(--win-fill-hover);
+  color: var(--win-text);
+}
+.settings-nav-item.on {
+  border-color: var(--win-stroke-strong);
+  background: var(--win-fill-press);
+  color: var(--win-text);
+  font-weight: 600;
+}
+.settings-nav-item svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.settings-nav-item.on svg {
+  stroke: var(--win-accent);
+}
+/* 二级菜单展开箭头 */
+.nav-caret {
+  margin-left: auto;
+  color: var(--win-text-3);
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+.nav-caret.open {
+  transform: rotate(90deg);
+}
+.settings-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 22px;
+}
+.settings-subnav button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--win-text-3);
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+.settings-subnav button:hover {
+  background: var(--win-fill-hover);
+  color: var(--win-text-2);
+}
+.settings-subnav button.on {
+  background: var(--win-fill-press);
+  color: var(--win-text);
+  font-weight: 600;
+}
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 20px 18px;
 }
 .settings-actions {
   display: flex;
@@ -1419,6 +1592,40 @@ function closeSession(id: string) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.set-desc {
+  margin: 0;
+  color: var(--win-text-3);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.set-btnrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.set-btnrow .btn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 12.5px;
+}
+/* 可选的加密导出入口：低调的文字按钮，不抢主操作 */
+.set-link {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--win-text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.set-link:hover:not(:disabled) {
+  color: var(--win-accent);
+}
+.set-link:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .set-row {
   display: flex;
@@ -2240,6 +2447,46 @@ function closeSession(id: string) {
   padding: 0 18px;
   font-size: 13px;
 }
+/* 导入 / 导出密码弹窗 */
+.pwd-dialog {
+  width: min(420px, 92vw);
+}
+.pwd-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.pwd-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--win-text-3);
+  font-size: 12px;
+}
+.pwd-fields input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 8px;
+  background: var(--win-fill);
+  color: var(--win-text);
+  font-size: 12.5px;
+  outline: none;
+}
+.pwd-fields input::placeholder {
+  color: var(--win-text-3);
+}
+.pwd-fields input:focus {
+  border-color: var(--win-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--win-accent) 18%, transparent);
+}
+.pwd-error {
+  margin: 0;
+  color: var(--win-close);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .btn.danger {
   background: var(--win-close);
   border-color: transparent;
@@ -2327,7 +2574,7 @@ function closeSession(id: string) {
   position: fixed;
   left: 50%;
   bottom: 24px;
-  z-index: 190;
+  z-index: 300;
   max-width: min(680px, 80vw);
   padding: 9px 15px;
   border: 1px solid var(--win-stroke-strong);

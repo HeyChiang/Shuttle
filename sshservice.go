@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -19,6 +19,9 @@ type SSHService struct {
 	mgr   *sshcore.Manager
 	sftp  *sshcore.SftpManager
 	store *sshcore.HostStore
+	// pendingImportPath 记录已选择、等待密码的导入文件，
+	// 让用户在输入密码后无需重新选择文件。
+	pendingImportPath string
 }
 
 // NewSSHService wires the session manager to the Wails event bus.
@@ -56,9 +59,9 @@ func (s *SSHService) SaveHosts(hosts []sshcore.HostConfig) error {
 }
 
 // ExportHosts writes every saved profile to a JSON file chosen by the user.
-// The exported file contains decrypted credentials; the UI warns about this
-// before calling.
-func (s *SSHService) ExportHosts() (string, error) {
+// Credentials are encrypted only when a passphrase is supplied; otherwise the
+// file is plain JSON, matching the legacy import format.
+func (s *SSHService) ExportHosts(passphrase string) (string, error) {
 	hosts, err := s.store.Load()
 	if err != nil {
 		return "", err
@@ -80,42 +83,66 @@ func (s *SSHService) ExportHosts() (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	data, err := json.MarshalIndent(hosts, "", "  ")
+	data, err := sshcore.ExportJSON(hosts, passphrase)
 	if err != nil {
-		return "", fmt.Errorf("生成导出文件失败: %w", err)
+		return "", err
 	}
-	// 文件内含明文凭据，权限尽量收紧。
+	// 文件可能含凭据，权限尽量收紧。
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
 		return "", fmt.Errorf("写入导出文件失败: %w", err)
 	}
 	return path, nil
 }
 
-// ImportHosts reads profiles from a JSON file chosen by the user. The profiles
-// are not persisted here: the caller merges them into the current list.
-func (s *SSHService) ImportHosts() ([]sshcore.HostConfig, error) {
-	dialog := openFileDialog()
-	if dialog == nil {
-		return nil, fmt.Errorf("应用尚未就绪")
-	}
-	dialog.SetTitle("导入主机配置")
-	dialog.AddFilter("JSON 文件", "*.json")
-	path, err := dialog.PromptForSingleSelection()
-	if err != nil {
-		return nil, err
-	}
+// errImportNeedsPassword 表示文件已加密但尚未提供密码，前端据此弹出密码框。
+const errImportNeedsPassword = "该文件已加密，请输入导入密码"
+
+// ImportHosts reads profiles from a JSON file chosen by the user. Encrypted
+// files need a passphrase; when it is missing the selected path is kept so the
+// next call (after the user types the password) does not reopen the file picker.
+// The profiles are not persisted here: the caller merges them into the list.
+func (s *SSHService) ImportHosts(passphrase string) ([]sshcore.HostConfig, error) {
+	path := s.pendingImportPath
+	s.pendingImportPath = ""
 	if path == "" {
-		return nil, nil
+		dialog := openFileDialog()
+		if dialog == nil {
+			return nil, fmt.Errorf("应用尚未就绪")
+		}
+		dialog.SetTitle("导入主机配置")
+		dialog.AddFilter("JSON 文件", "*.json")
+		var err error
+		path, err = dialog.PromptForSingleSelection()
+		if err != nil {
+			return nil, err
+		}
+		if path == "" {
+			return nil, nil
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("读取导入文件失败: %w", err)
 	}
-	var hosts []sshcore.HostConfig
-	if err := json.Unmarshal(data, &hosts); err != nil {
-		return nil, fmt.Errorf("解析导入文件失败: %w", err)
+	if sshcore.ExportNeedsPassphrase(data) && strings.TrimSpace(passphrase) == "" {
+		s.pendingImportPath = path
+		return nil, errors.New(errImportNeedsPassword)
+	}
+	hosts, err := sshcore.DecryptExport(data, passphrase)
+	if err != nil {
+		// 密码错误等解密失败时保留路径，方便直接修改密码后重试。
+		if sshcore.ExportNeedsPassphrase(data) {
+			s.pendingImportPath = path
+		}
+		return nil, err
 	}
 	return hosts, nil
+}
+
+// CancelImport drops a pending encrypted import when the user cancels the
+// password prompt.
+func (s *SSHService) CancelImport() {
+	s.pendingImportPath = ""
 }
 
 // --- session lifecycle -----------------------------------------------------
