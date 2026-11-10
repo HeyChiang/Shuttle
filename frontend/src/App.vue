@@ -203,7 +203,8 @@ function onDragMove(e: PointerEvent) {
   const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
 
   if (st.kind === "pane") {
-    paneDropActive.value = !!hit?.closest(".tb-sessions");
+    // 整个标题栏都是脱组落点，避免只在标签那一小块才生效
+    paneDropActive.value = !!hit?.closest(".titlebar");
     return;
   }
 
@@ -967,7 +968,11 @@ function closeSession(id: string) {
     @click="closePopups"
   >
     <!-- 第一行：品牌 + SFTP + 窗口控制 -->
-    <header ref="titlebarEl" class="titlebar">
+    <header
+      ref="titlebarEl"
+      class="titlebar"
+      :class="{ 'pane-drop': paneDropActive }"
+    >
       <div class="tb-brand">
         <span class="logo">⌁</span>
         <strong>Shuttle</strong>
@@ -1008,7 +1013,6 @@ function closeSession(id: string) {
         v-if="sessions.length"
         ref="sessionsEl"
         class="tb-sessions"
-        :class="{ 'pane-drop': paneDropActive }"
         style="--wails-draggable: no-drag"
       >
         <div v-if="visibleTabs.length" class="tb-tabs">
@@ -1022,6 +1026,7 @@ function closeSession(id: string) {
               dragging: dragTabKey === t.key,
             }"
             :title="tabTitle(t)"
+            :data-tab-key="t.key"
             @pointerdown="onTabPointerDown($event, t)"
             @click="onTabClick(t)"
           >
@@ -2186,8 +2191,8 @@ function closeSession(id: string) {
   flex: 0 1 auto;
   min-width: 0;
 }
-/* 从分屏拖回顶部标签栏时的落点提示 */
-.tb-sessions.pane-drop {
+/* 从分屏拖回顶部标题栏时的落点提示 */
+.titlebar.pane-drop {
   outline: 1px dashed var(--win-accent);
   outline-offset: -2px;
   border-radius: 8px;
