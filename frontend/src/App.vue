@@ -191,6 +191,13 @@ function onPanePointerDown(id: string, e: PointerEvent) {
   beginDrag(e, { kind: "pane", paneId: id });
 }
 
+/** 拖动的标签是否已经和目标面板处在同一个工作组（含目标面板就是它自己） */
+function sameGroupAs(t: SessionTab, targetId: string): boolean {
+  const group = splitGroupOf(targetId);
+  const ids = group?.ids ?? [targetId];
+  return t.sessions.some((s) => ids.includes(s.id));
+}
+
 function onDragMove(e: PointerEvent) {
   const st = dragState;
   if (!st) return;
@@ -220,6 +227,12 @@ function onDragMove(e: PointerEvent) {
   const paneEl = hit?.closest("[data-pane-id]") as HTMLElement | null;
   const targetId = paneEl?.dataset.paneId;
   if (!paneEl || !targetId) {
+    dropPlan.value = null;
+    splitPreview.value = null;
+    return;
+  }
+  // 拖的是这个面板自己的标签（或它已在的工作组）：分屏不会产生任何变化，不显示预览
+  if (st.tab && sameGroupAs(st.tab, targetId)) {
     dropPlan.value = null;
     splitPreview.value = null;
     return;
