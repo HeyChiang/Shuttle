@@ -177,6 +177,18 @@ export default {
     fontHint: "Solo afecta al tamaño de los caracteres en las terminales SSH",
     reset: "Restaurar valores predeterminados",
     languageDesc: "Elige el idioma de la interfaz. El cambio se aplica de inmediato.",
+    about: "Acerca de",
+  },
+  about: {
+    appName: "Shuttle",
+    tagline: "Gestor SSH para múltiples hosts",
+    initial: "S",
+    author: "Sobre el autor",
+    intro:
+      "Años de experiencia en proyectos de startup. Disponible para desarrollo full-stack: desde aplicaciones móviles hasta software de escritorio.",
+    contact: "Contacto",
+    wechat: "WeChat",
+    email: "Correo",
   },
   transfer: {
     exportTitle: "Exportación cifrada",

@@ -175,6 +175,17 @@ export default {
     fontHint: "仅影响 SSH 终端中的字符大小",
     reset: "恢复默认",
     languageDesc: "选择界面语言，修改后立即生效。",
+    about: "关于",
+  },
+  about: {
+    appName: "Shuttle",
+    tagline: "SSH 批量管理工具",
+    initial: "S",
+    author: "作者简介",
+    intro: "多年创业项目经验，承接全栈开发任务，从移动端到 PC 端软件开发均可。",
+    contact: "联系方式",
+    wechat: "微信号",
+    email: "邮箱",
   },
   transfer: {
     exportTitle: "加密导出",

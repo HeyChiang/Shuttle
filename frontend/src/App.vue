@@ -68,8 +68,8 @@ const sessionMenuOpen = ref(false);
 /** 左侧栏设置入口 */
 const settingsOpen = ref(false);
 const settingsMaskEl = ref<HTMLElement>();
-/** 设置左栏选中项：导入、导出、主题、字号与语言 */
-const settingsTab = ref<"import" | "export" | "theme" | "font" | "language">("import");
+/** 设置左栏选中项：导入、导出、主题、字号、语言与关于 */
+const settingsTab = ref<"import" | "export" | "theme" | "font" | "language" | "about">("import");
 /** 「外观」二级菜单是否展开 */
 const appearanceOpen = ref(true);
 /** 主题选项：跟随系统 / 浅色 / 深色 */
@@ -1319,6 +1319,18 @@ function closeSession(id: string) {
                 </svg>
                 <span>{{ t("settings.language") }}</span>
               </button>
+
+              <button
+                class="settings-nav-item"
+                :class="{ on: settingsTab === 'about' }"
+                @click="settingsTab = 'about'"
+              >
+                <svg viewBox="0 0 16 16">
+                  <circle cx="8" cy="8" r="5.6" />
+                  <path d="M8 7.4v4M8 5.4v.1" />
+                </svg>
+                <span>{{ t("settings.about") }}</span>
+              </button>
             </nav>
 
             <section class="settings-content">
@@ -1383,7 +1395,7 @@ function closeSession(id: string) {
                 </div>
               </template>
 
-              <template v-else>
+              <template v-else-if="settingsTab === 'language'">
                 <div class="set-group">
                   <span class="set-label">{{ t("settings.language") }}</span>
                   <p class="set-desc">{{ t("settings.languageDesc") }}</p>
@@ -1396,6 +1408,39 @@ function closeSession(id: string) {
                     >
                       {{ opt.label }}
                     </button>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="set-group about-group">
+                  <div class="about-hero">
+                    <span class="about-avatar">{{ t("about.initial") }}</span>
+                    <div class="about-id">
+                      <strong>{{ t("about.appName") }}</strong>
+                      <small>{{ t("about.tagline") }}</small>
+                    </div>
+                  </div>
+
+                  <div class="about-block">
+                    <span class="set-label">{{ t("about.author") }}</span>
+                    <p class="set-desc">{{ t("about.intro") }}</p>
+                  </div>
+
+                  <div class="about-block">
+                    <span class="set-label">{{ t("about.contact") }}</span>
+                    <div class="about-rows">
+                      <div class="about-row">
+                        <span class="about-key">{{ t("about.wechat") }}</span>
+                        <span class="about-value">jhhlcc</span>
+                      </div>
+                      <div class="about-row">
+                        <span class="about-key">{{ t("about.email") }}</span>
+                        <a class="about-value about-link" href="mailto:emmet.jiang@gmail.com">
+                          emmet.jiang@gmail.com
+                        </a>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -2042,6 +2087,77 @@ function closeSession(id: string) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* 关于：应用信息、作者简介与联系方式 */
+.about-group {
+  gap: 14px;
+}
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--win-stroke);
+}
+.about-avatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+  font-size: 18px;
+  font-weight: 600;
+}
+.about-id {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.about-id strong {
+  font-size: 15px;
+}
+.about-id small {
+  color: var(--win-text-3);
+  font-size: 12px;
+}
+.about-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.about-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--win-stroke);
+  border-radius: 8px;
+  background: var(--win-fill);
+}
+.about-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.about-key {
+  flex: none;
+  width: 52px;
+  color: var(--win-text-3);
+  font-size: 12px;
+}
+.about-value {
+  color: var(--win-text);
+  font-size: 12.5px;
+}
+.about-link {
+  color: var(--win-accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+.about-link:hover {
+  text-decoration: underline;
 }
 .set-desc {
   margin: 0;
