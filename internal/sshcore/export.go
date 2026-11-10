@@ -42,13 +42,13 @@ func ExportJSON(hosts []HostConfig, passphrase string) ([]byte, error) {
 	if strings.TrimSpace(passphrase) == "" {
 		data, err := json.MarshalIndent(cleaned, "", "  ")
 		if err != nil {
-			return nil, fmt.Errorf("生成导出文件失败: %w", err)
+			return nil, fmt.Errorf("failed to generate export file: %w", err)
 		}
 		return data, nil
 	}
 	salt := make([]byte, exportSaltSize)
 	if _, err := rand.Read(salt); err != nil {
-		return nil, fmt.Errorf("生成随机盐失败: %w", err)
+		return nil, fmt.Errorf("failed to generate random salt: %w", err)
 	}
 	key := pbkdf2.Key([]byte(passphrase), salt, exportKDFIterations, 32, sha256.New)
 
@@ -72,7 +72,7 @@ func ExportJSON(hosts []HostConfig, passphrase string) ([]byte, error) {
 	}
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("生成导出文件失败: %w", err)
+		return nil, fmt.Errorf("failed to generate export file: %w", err)
 	}
 	return data, nil
 }
@@ -95,29 +95,29 @@ func ExportNeedsPassphrase(data []byte) bool {
 func DecryptExport(data []byte, passphrase string) ([]HostConfig, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 {
-		return nil, errors.New("导入文件内容为空")
+		return nil, errors.New("import file is empty")
 	}
 	if trimmed[0] == '[' {
 		var hosts []HostConfig
 		if err := json.Unmarshal(trimmed, &hosts); err != nil {
-			return nil, fmt.Errorf("解析导入文件失败: %w", err)
+			return nil, fmt.Errorf("failed to parse import file: %w", err)
 		}
 		return hosts, nil
 	}
 
 	var doc exportFile
 	if err := json.Unmarshal(trimmed, &doc); err != nil {
-		return nil, fmt.Errorf("解析导入文件失败: %w", err)
+		return nil, fmt.Errorf("failed to parse import file: %w", err)
 	}
 	if !doc.Encrypted {
 		return doc.Hosts, nil
 	}
 	if strings.TrimSpace(passphrase) == "" {
-		return nil, errors.New("该文件已加密，请输入导入密码")
+		return nil, errors.New("the file is encrypted, please enter the import password")
 	}
 	salt, err := base64.StdEncoding.DecodeString(doc.Salt)
 	if err != nil || len(salt) != exportSaltSize {
-		return nil, errors.New("导入文件已损坏：盐值无效")
+		return nil, errors.New("import file is corrupted: invalid salt")
 	}
 	key := pbkdf2.Key([]byte(passphrase), salt, exportKDFIterations, 32, sha256.New)
 
@@ -125,10 +125,10 @@ func DecryptExport(data []byte, passphrase string) ([]HostConfig, error) {
 	for _, h := range doc.Hosts {
 		var err error
 		if h.Password, err = openExport(h.Password, key); err != nil {
-			return nil, errors.New("导入密码错误，或文件已损坏")
+			return nil, errors.New("incorrect import password or corrupted file")
 		}
 		if h.KeyPassphrase, err = openExport(h.KeyPassphrase, key); err != nil {
-			return nil, errors.New("导入密码错误，或文件已损坏")
+			return nil, errors.New("incorrect import password or corrupted file")
 		}
 		hosts = append(hosts, h)
 	}
@@ -146,7 +146,7 @@ func sealExport(plain string, key []byte) (string, error) {
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("生成随机数失败: %w", err)
+		return "", fmt.Errorf("failed to generate random number: %w", err)
 	}
 	sealed := gcm.Seal(nonce, nonce, []byte(plain), nil)
 	return exportCipherPrefix + base64.StdEncoding.EncodeToString(sealed), nil
@@ -158,7 +158,7 @@ func openExport(stored string, key []byte) (string, error) {
 	}
 	payload, ok := strings.CutPrefix(stored, exportCipherPrefix)
 	if !ok {
-		return "", errors.New("凭据不是当前导出格式")
+		return "", errors.New("credential is not in the current export format")
 	}
 	raw, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
@@ -169,7 +169,7 @@ func openExport(stored string, key []byte) (string, error) {
 		return "", err
 	}
 	if len(raw) < gcm.NonceSize() {
-		return "", errors.New("密文长度无效")
+		return "", errors.New("invalid ciphertext length")
 	}
 	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
 	if err != nil {

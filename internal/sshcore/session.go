@@ -93,25 +93,25 @@ func (s *session) info() SessionInfo {
 
 func loadSigner(keyPath, passphrase string) (ssh.Signer, error) {
 	if keyPath == "" {
-		return nil, fmt.Errorf("请选择私钥文件")
+		return nil, fmt.Errorf("please select a private key file")
 	}
 	raw, err := os.ReadFile(keyPath)
 	if err != nil {
-		return nil, fmt.Errorf("读取私钥失败: %w", err)
+		return nil, fmt.Errorf("failed to read private key: %w", err)
 	}
 	if passphrase != "" {
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(raw, []byte(passphrase))
 		if err != nil {
-			return nil, fmt.Errorf("解析私钥失败: %w", err)
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
 		}
 		return signer, nil
 	}
 	signer, err := ssh.ParsePrivateKey(raw)
 	if err != nil {
 		if _, ok := err.(*ssh.PassphraseMissingError); ok {
-			return nil, fmt.Errorf("私钥已加密，请填写私钥口令")
+			return nil, fmt.Errorf("private key is encrypted, please enter the key passphrase")
 		}
-		return nil, fmt.Errorf("解析私钥失败: %w", err)
+		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 	return signer, nil
 }
@@ -127,7 +127,7 @@ func (s *session) start() error {
 	shell, err := s.client.NewSession()
 	if err != nil {
 		_ = s.client.Close()
-		return fmt.Errorf("创建会话失败: %w", err)
+		return fmt.Errorf("failed to create session: %w", err)
 	}
 	s.shell = shell
 
@@ -138,7 +138,7 @@ func (s *session) start() error {
 	}
 	if err := shell.RequestPty(s.cfg.TermType, s.cfg.Rows, s.cfg.Cols, modes); err != nil {
 		_ = s.client.Close()
-		return fmt.Errorf("申请 PTY 失败: %w", err)
+		return fmt.Errorf("failed to request PTY: %w", err)
 	}
 
 	rawStdin, err := shell.StdinPipe()
@@ -171,7 +171,7 @@ func (s *session) start() error {
 
 	if err := shell.Shell(); err != nil {
 		_ = s.client.Close()
-		return fmt.Errorf("启动 shell 失败: %w", err)
+		return fmt.Errorf("failed to start shell: %w", err)
 	}
 
 	go s.pump()
@@ -235,7 +235,7 @@ func (s *session) pump() {
 // wait blocks until the remote shell exits and reports the reason.
 func (s *session) wait() {
 	err := s.shell.Wait()
-	reason := "连接已关闭"
+	reason := "connection closed"
 	normal := err == nil
 	if err != nil {
 		var exitErr *ssh.ExitError
@@ -243,7 +243,7 @@ func (s *session) wait() {
 			// 远端 shell 正常退出（用户执行 exit / logout），不算连接故障。
 			normal = true
 			if code := exitErr.ExitStatus(); code != 0 {
-				reason = fmt.Sprintf("退出码 %d", code)
+				reason = fmt.Sprintf("exit code %d", code)
 			}
 		} else {
 			reason = err.Error()
@@ -265,7 +265,7 @@ func (s *session) isClosed() bool {
 
 func (s *session) write(data []byte) error {
 	if s.isClosed() || s.stdin == nil {
-		return fmt.Errorf("会话已关闭")
+		return fmt.Errorf("session is closed")
 	}
 	_, err := s.stdin.Write(data)
 	return err
@@ -273,7 +273,7 @@ func (s *session) write(data []byte) error {
 
 func (s *session) resize(cols, rows int) error {
 	if s.isClosed() || s.shell == nil {
-		return fmt.Errorf("会话已关闭")
+		return fmt.Errorf("session is closed")
 	}
 	return s.shell.WindowChange(rows, cols)
 }
@@ -304,11 +304,11 @@ func (s *session) sftpClient() (*sftp.Client, error) {
 		return s.sftp, nil
 	}
 	if s.client == nil {
-		return nil, fmt.Errorf("会话未连接")
+		return nil, fmt.Errorf("session is not connected")
 	}
 	c, err := sftp.NewClient(s.client)
 	if err != nil {
-		return nil, fmt.Errorf("打开 SFTP 失败: %w", err)
+		return nil, fmt.Errorf("failed to open SFTP: %w", err)
 	}
 	s.sftp = c
 	return c, nil

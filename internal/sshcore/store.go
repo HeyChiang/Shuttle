@@ -25,7 +25,7 @@ type HostStore struct {
 func appDir() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("无法定位程序目录: %w", err)
+		return "", fmt.Errorf("failed to locate application directory: %w", err)
 	}
 	return filepath.Dir(exe), nil
 }
@@ -39,7 +39,7 @@ func NewHostStore() (*HostStore, error) {
 	path := filepath.Join(dir, storeFileName)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, fmt.Errorf("打开主机数据库失败: %w", err)
+		return nil, fmt.Errorf("failed to open host database: %w", err)
 	}
 	// SQLite 只允许单写者，单连接可以避免并发写锁冲突。
 	db.SetMaxOpenConns(1)
@@ -53,10 +53,10 @@ func NewHostStore() (*HostStore, error) {
 
 func (s *HostStore) init(path string) error {
 	if _, err := s.db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
-		return fmt.Errorf("初始化数据库失败: %w", err)
+		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	if _, err := s.db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
-		return fmt.Errorf("初始化数据库失败: %w", err)
+		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	if err := s.migrate(); err != nil {
 		return err
@@ -69,7 +69,7 @@ func (s *HostStore) init(path string) error {
 func (s *HostStore) migrate() error {
 	var version int
 	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return fmt.Errorf("读取数据库版本失败: %w", err)
+		return fmt.Errorf("failed to read database version: %w", err)
 	}
 	if version >= 1 {
 		return nil
@@ -92,10 +92,10 @@ func (s *HostStore) migrate() error {
 		rows             INTEGER NOT NULL DEFAULT 0,
 		timeout_sec      INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
-		return fmt.Errorf("创建数据表失败: %w", err)
+		return fmt.Errorf("failed to create tables: %w", err)
 	}
 	if _, err := s.db.Exec(`PRAGMA user_version = 1`); err != nil {
-		return fmt.Errorf("写入数据库版本失败: %w", err)
+		return fmt.Errorf("failed to write database version: %w", err)
 	}
 	return nil
 }
@@ -109,7 +109,7 @@ func (s *HostStore) Load() ([]HostConfig, error) {
 		cols, rows, timeout_sec
 		FROM hosts ORDER BY position`)
 	if err != nil {
-		return nil, fmt.Errorf("读取主机档案失败: %w", err)
+		return nil, fmt.Errorf("failed to load host profiles: %w", err)
 	}
 	defer rows.Close()
 	hosts := []HostConfig{}
@@ -118,7 +118,7 @@ func (s *HostStore) Load() ([]HostConfig, error) {
 		if err := rows.Scan(&h.ID, &h.Name, &h.Group, &h.Host, &h.Port, &h.User,
 			&h.AuthMethod, &h.Password, &h.PrivateKeyPath, &h.KeyPassphrase,
 			&h.Encoding, &h.TermType, &h.Cols, &h.Rows, &h.TimeoutSec); err != nil {
-			return nil, fmt.Errorf("读取主机档案失败: %w", err)
+			return nil, fmt.Errorf("failed to load host profiles: %w", err)
 		}
 		// 解密失败（例如换机器/换用户后无法解出）时留空，用户重新输入即可。
 		if h.Password, err = decryptSecret(h.Password); err != nil {
@@ -130,7 +130,7 @@ func (s *HostStore) Load() ([]HostConfig, error) {
 		hosts = append(hosts, h)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("读取主机档案失败: %w", err)
+		return nil, fmt.Errorf("failed to load host profiles: %w", err)
 	}
 	return hosts, nil
 }
@@ -149,11 +149,11 @@ func (s *HostStore) replaceAll(hosts []HostConfig) error {
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("保存主机档案失败: %w", err)
+		return fmt.Errorf("failed to save host profiles: %w", err)
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`DELETE FROM hosts`); err != nil {
-		return fmt.Errorf("保存主机档案失败: %w", err)
+		return fmt.Errorf("failed to save host profiles: %w", err)
 	}
 	stmt, err := tx.Prepare(`INSERT INTO hosts (
 		position, id, name, grp, host, port, user, auth_method,
@@ -161,7 +161,7 @@ func (s *HostStore) replaceAll(hosts []HostConfig) error {
 		cols, rows, timeout_sec
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return fmt.Errorf("保存主机档案失败: %w", err)
+		return fmt.Errorf("failed to save host profiles: %w", err)
 	}
 	defer stmt.Close()
 	for i, h := range hosts {
@@ -176,7 +176,7 @@ func (s *HostStore) replaceAll(hosts []HostConfig) error {
 		if _, err := stmt.Exec(i, h.ID, h.Name, h.Group, h.Host, h.Port, h.User,
 			h.AuthMethod, pwd, h.PrivateKeyPath, pass, h.Encoding, h.TermType,
 			h.Cols, h.Rows, h.TimeoutSec); err != nil {
-			return fmt.Errorf("保存主机档案失败: %w", err)
+			return fmt.Errorf("failed to save host profiles: %w", err)
 		}
 	}
 	return tx.Commit()

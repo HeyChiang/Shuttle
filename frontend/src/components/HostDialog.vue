@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 连接档案编辑弹窗。传入 host 时打开；保存后通过 submit 事件回传副本。
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { HostConfig } from "../../bindings/shuttle/internal/sshcore/models";
 import { blankHost, encodings } from "../store";
@@ -23,6 +24,7 @@ const TERM_TYPES = [
 ];
 
 const props = defineProps<{ host: HostConfig | null }>();
+const { t } = useI18n();
 const emit = defineEmits<{
   (e: "submit", host: HostConfig): void;
   (e: "cancel"): void;
@@ -48,18 +50,18 @@ watch(
 );
 
 async function pickKey() {
-  const p = await SSH.PickFile("选择私钥文件");
+  const p = await SSH.PickFile(t("hostDialog.pickKeyTitle"));
   if (p) form.value.privateKeyPath = p;
 }
 
 function submit() {
   const f = form.value;
   if (!f.host.trim()) {
-    error.value = "请填写主机地址";
+    error.value = t("hostDialog.errHost");
     return;
   }
   if (!f.user.trim()) {
-    error.value = "请填写登录用户";
+    error.value = t("hostDialog.errUser");
     return;
   }
   if (!f.name.trim()) {
@@ -73,8 +75,8 @@ function submit() {
   <div class="mask" @click.self="emit('cancel')">
     <div class="dialog">
       <header>
-        <h3>{{ host ? "编辑主机" : "新增主机" }}</h3>
-        <button class="close" title="关闭" @click="emit('cancel')">
+        <h3>{{ host ? t("hostDialog.editTitle") : t("hostDialog.newTitle") }}</h3>
+        <button class="close" :title="t('common.close')" @click="emit('cancel')">
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
             <path
               d="M3.5 3.5l9 9M12.5 3.5l-9 9"
@@ -89,84 +91,84 @@ function submit() {
 
       <div class="form">
         <label class="span2">
-          <span>名称</span>
-          <input v-model="form.name" placeholder="例如：生产环境-Web01" />
+          <span>{{ t("hostDialog.name") }}</span>
+          <input v-model="form.name" :placeholder="t('hostDialog.namePlaceholder')" />
         </label>
 
         <label>
-          <span>分组</span>
-          <input v-model="form.group" placeholder="默认分组" />
+          <span>{{ t("hostDialog.group") }}</span>
+          <input v-model="form.group" :placeholder="t('hostDialog.groupPlaceholder')" />
         </label>
 
         <label>
-          <span>主机地址</span>
-          <input v-model="form.host" placeholder="192.168.1.10 或 example.com" />
+          <span>{{ t("hostDialog.host") }}</span>
+          <input v-model="form.host" :placeholder="t('hostDialog.hostPlaceholder')" />
         </label>
 
         <label>
-          <span>端口</span>
+          <span>{{ t("hostDialog.port") }}</span>
           <input v-model.number="form.port" type="number" min="1" max="65535" />
         </label>
 
         <label>
-          <span>登录用户</span>
+          <span>{{ t("hostDialog.user") }}</span>
           <input v-model="form.user" placeholder="root" />
         </label>
 
         <label class="span2">
-          <span>认证方式</span>
+          <span>{{ t("hostDialog.auth") }}</span>
           <select v-model="form.authMethod">
-            <option value="password">密码</option>
-            <option value="key">私钥文件</option>
+            <option value="password">{{ t("hostDialog.authPassword") }}</option>
+            <option value="key">{{ t("hostDialog.authKey") }}</option>
             <option value="agent">SSH Agent / Pageant</option>
           </select>
         </label>
 
         <label v-if="form.authMethod === 'password'" class="span2">
-          <span>密码</span>
-          <input v-model="form.password" type="password" placeholder="登录密码" />
+          <span>{{ t("hostDialog.password") }}</span>
+          <input v-model="form.password" type="password" :placeholder="t('hostDialog.passwordPlaceholder')" />
         </label>
 
         <template v-if="form.authMethod === 'key'">
           <label class="span2">
-            <span>私钥文件</span>
+            <span>{{ t("hostDialog.keyFile") }}</span>
             <div class="row">
               <input v-model="form.privateKeyPath" placeholder="C:\\Users\\me\\.ssh\\id_rsa" />
-              <button type="button" @click="pickKey">浏览…</button>
+              <button type="button" @click="pickKey">{{ t("common.browse") }}</button>
             </div>
           </label>
           <label class="span2">
-            <span>私钥口令（可选）</span>
-            <input v-model="form.keyPassphrase" type="password" placeholder="留空表示私钥无口令" />
+            <span>{{ t("hostDialog.keyPassphrase") }}</span>
+            <input v-model="form.keyPassphrase" type="password" :placeholder="t('hostDialog.keyPassphrasePlaceholder')" />
           </label>
         </template>
 
         <label>
-          <span>字符编码</span>
+          <span>{{ t("hostDialog.encoding") }}</span>
           <select v-model="form.encoding">
             <option v-for="e in encodings" :key="e" :value="e">{{ e }}</option>
           </select>
         </label>
 
         <label>
-          <span>终端类型</span>
+          <span>{{ t("hostDialog.termType") }}</span>
           <select v-model="form.termType">
             <option v-for="t in termOptions" :key="t" :value="t">{{ t }}</option>
           </select>
         </label>
 
         <label>
-          <span>初始列数</span>
+          <span>{{ t("hostDialog.cols") }}</span>
           <input v-model.number="form.cols" type="number" min="20" max="500" />
         </label>
 
         <label>
-          <span>初始行数</span>
+          <span>{{ t("hostDialog.rows") }}</span>
           <input v-model.number="form.rows" type="number" min="10" max="200" />
         </label>
 
         <label class="span2">
-          <span>连接超时（秒）</span>
+          <span>{{ t("hostDialog.timeout") }}</span>
           <input v-model.number="form.timeoutSec" type="number" min="3" max="300" />
         </label>
       </div>
@@ -174,8 +176,8 @@ function submit() {
       <p v-if="error" class="error">{{ error }}</p>
 
       <footer>
-        <button class="ghost" @click="emit('cancel')">取消</button>
-        <button class="primary" @click="submit">{{ host ? "保存" : "创建并保存" }}</button>
+        <button class="ghost" @click="emit('cancel')">{{ t("common.cancel") }}</button>
+        <button class="primary" @click="submit">{{ host ? t("common.save") : t("common.createSave") }}</button>
       </footer>
     </div>
   </div>

@@ -2,6 +2,7 @@
 // SFTP 单侧面板：可在「本地」与「远程服务器」之间切换，两侧互相独立。
 // 拖拽投放由目标面板处理：本地 → 上传，远程 → 下载或服务器互传。
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { HostConfig } from "../../bindings/shuttle/internal/sshcore/models";
 import { endSftpDrag, sftpDrag } from "../sftpDrag";
@@ -22,6 +23,8 @@ const emit = defineEmits<{
 }>();
 
 type Kind = "local" | "remote";
+
+const { t } = useI18n();
 
 const host = computed(() => props.hosts.find((h) => h.id === props.hostId));
 const hostLabel = computed(() => (host.value ? host.value.name || host.value.host : ""));
@@ -64,24 +67,24 @@ async function closeToken(t: string) {
   }
 }
 
-async function ensure(t: string) {
+async function ensure(tk: string) {
   const h = host.value;
-  if (!t || !h) return;
+  if (!tk || !h) return;
   const g = ++gen;
   connecting.value = true;
   error.value = "";
   try {
-    await SSH.SftpOpen({ ...h, sessionId: t }, t);
+    await SSH.SftpOpen({ ...h, sessionId: tk }, tk);
     // 期间用户已经切换了目标，关闭这条过期的连接
     if (g !== gen) {
-      void closeToken(t);
+      void closeToken(tk);
       return;
     }
-    activeToken = t;
+    activeToken = tk;
     connected.value = true;
   } catch (e) {
     if (g !== gen) return;
-    error.value = `连接 ${hostLabel.value} 失败：${String(e)}`;
+    error.value = t("sftp.connectFailed", { host: hostLabel.value, error: String(e) });
   } finally {
     if (g === gen) connecting.value = false;
   }
@@ -171,7 +174,7 @@ async function run(okMessage: () => string, work: () => Promise<void>, after?: (
     after?.();
     notice.value = okMessage();
   } catch (e) {
-    error.value = `传输失败：${String(e)}`;
+    error.value = t("sftp.transferFailed", { error: String(e) });
   } finally {
     busy.value = false;
   }
@@ -208,11 +211,9 @@ async function confirmOverwrite(paths: string[], dir: string): Promise<boolean> 
     return true;
   }
   if (!hits.length) return true;
-  const preview = hits.slice(0, 5).join("、");
-  const more = hits.length > 5 ? ` 等 ${hits.length} 个` : "";
-  return window.confirm(
-    `目标目录已存在同名文件：${preview}${more}\n继续将覆盖这些文件，是否继续？`,
-  );
+  const preview = hits.slice(0, 5).join(t("sftp.listSeparator"));
+  const more = hits.length > 5 ? t("sftp.overwriteMore", { n: hits.length }) : "";
+  return window.confirm(t("sftp.overwrite", { files: preview, more }));
 }
 
 async function onDropFiles(paths: string[], dir: string) {
@@ -223,12 +224,12 @@ async function onDropFiles(paths: string[], dir: string) {
   if (props.kind === "local") {
     if (src.kind !== "remote") return;
     if (!dir) {
-      error.value = "本地目录尚未就绪";
+      error.value = t("sftp.localNotReady");
       return;
     }
     if (!(await confirmOverwrite(paths, dir))) return;
     await run(
-      () => `已下载 ${paths.length} 个文件到 ${dir}`,
+      () => t("sftp.downloaded", { n: paths.length, dir }),
       () => SSH.SftpDownload(src.token, paths, dir),
       () => {
         localRev.value += 1;
@@ -237,24 +238,24 @@ async function onDropFiles(paths: string[], dir: string) {
     return;
   }
 
-  const t = token.value;
-  if (!connected.value || !t || !dir) return;
+  const tk = token.value;
+  if (!connected.value || !tk || !dir) return;
   if (src.kind === "local") {
     if (!(await confirmOverwrite(paths, dir))) return;
     await run(
-      () => `已上传 ${paths.length} 个文件到 ${hostLabel.value}:${dir}`,
-      () => SSH.SftpUpload(t, dir, paths),
+      () => t("sftp.uploaded", { n: paths.length, host: hostLabel.value, dir }),
+      () => SSH.SftpUpload(tk, dir, paths),
       () => {
         rev.value += 1;
       },
     );
     return;
   }
-  if (src.token === t) return;
+  if (src.token === tk) return;
   if (!(await confirmOverwrite(paths, dir))) return;
   await run(
-    () => `已传输 ${paths.length} 个文件到 ${hostLabel.value}:${dir}`,
-    () => SSH.SftpTransfer(src.token, t, paths, dir),
+    () => t("sftp.transferred", { n: paths.length, host: hostLabel.value, dir }),
+    () => SSH.SftpTransfer(src.token, tk, paths, dir),
     () => {
       rev.value += 1;
     },
@@ -271,19 +272,23 @@ onBeforeUnmount(() => {
   <section class="side">
     <header class="side-head">
       <div class="kind-seg">
-        <button :class="{ on: kind === 'local' }" @click="setKind('local')">本地</button>
-        <button :class="{ on: kind === 'remote' }" @click="setKind('remote')">远程</button>
+        <button :class="{ on: kind === 'local' }" @click="setKind('local')">
+          {{ t("common.local") }}
+        </button>
+        <button :class="{ on: kind === 'remote' }" @click="setKind('remote')">
+          {{ t("common.remote") }}
+        </button>
       </div>
 
       <template v-if="kind === 'remote'">
         <button v-if="host" class="host-chip" :title="`${hostLabel} · ${host.user}@${host.host}:${host.port}`" @click="openPicker">
           <span class="dot" :class="{ on: connected, wait: connecting }" />
           <span class="host-name">{{ hostLabel }}</span>
-          <span class="host-change">更换</span>
+          <span class="host-change">{{ t("sftp.change") }}</span>
         </button>
       </template>
 
-      <span class="side-hint">{{ busy ? "传输中…" : "" }}</span>
+      <span class="side-hint">{{ busy ? t("sftp.busy") : "" }}</span>
     </header>
 
     <div class="side-body">
@@ -292,11 +297,18 @@ onBeforeUnmount(() => {
           <input
             ref="queryEl"
             v-model="query"
-            placeholder="搜索服务器：名称、IP、分组"
+            :placeholder="t('sftp.pickerPlaceholder')"
             @keydown.esc="cancelPicker"
             @keydown.enter="pickFirst"
           />
-          <button v-if="hostId" class="pk-cancel" title="关闭" @click="cancelPicker">×</button>
+          <button
+            v-if="hostId"
+            class="pk-cancel"
+            :title="t('common.close')"
+            @click="cancelPicker"
+          >
+            ×
+          </button>
         </div>
         <div class="pk-list">
           <button v-for="h in filteredHosts" :key="h.id" class="pk-item" @click="chooseHost(h)">
@@ -304,7 +316,7 @@ onBeforeUnmount(() => {
             <span class="pk-meta">{{ h.user }}@{{ h.host }}:{{ h.port }}</span>
           </button>
           <p v-if="!filteredHosts.length" class="pk-empty">
-            {{ hosts.length ? "没有匹配的服务器" : "还没有保存的服务器" }}
+            {{ hosts.length ? t("search.noMatch") : t("search.noSaved") }}
           </p>
         </div>
       </div>
@@ -327,8 +339,10 @@ onBeforeUnmount(() => {
           @drop-files="onDropFiles"
         />
         <div v-else class="pane-state">
-          <p>{{ connecting ? "正在连接服务器…" : error || "请选择服务器" }}</p>
-          <button v-if="!connecting && host" class="mini" @click="ensure(token)">重试</button>
+          <p>{{ connecting ? t("sftp.connectingServer") : error || t("sftp.selectServer") }}</p>
+          <button v-if="!connecting && host" class="mini" @click="ensure(token)">
+            {{ t("common.retry") }}
+          </button>
         </div>
       </template>
     </div>

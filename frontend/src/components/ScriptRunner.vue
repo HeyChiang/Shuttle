@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 代码块：在 SSH 终端页从右侧抽屉快速选择已保存脚本，执行或粘贴到当前会话。
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   activeId,
   isConnected,
@@ -10,6 +11,7 @@ import {
 } from "../store";
 import { firstLine, snippets, type Snippet } from "../snippets";
 
+const { t } = useI18n();
 const open = ref(false);
 const maskEl = ref<HTMLElement>();
 
@@ -50,7 +52,7 @@ function pasteSnippet(snippet: Snippet) {
     <button
       class="code-btn"
       :class="{ on: open }"
-      title="代码块：从右侧展开，悬停可直接执行或粘贴"
+      :title="t('runner.tip')"
       @click.stop="open = !open"
     >
       <svg viewBox="0 0 20 20">
@@ -70,15 +72,15 @@ function pasteSnippet(snippet: Snippet) {
       @click.self="open = false"
       @keydown.esc="open = false"
     >
-      <aside class="code-drawer" role="dialog" aria-label="代码块">
+      <aside class="code-drawer" role="dialog" :aria-label="t('runner.title')">
         <header class="drawer-head">
           <div class="code-title">
-            <strong>代码块</strong>
+            <strong>{{ t("runner.title") }}</strong>
             <span class="code-target" :class="{ err: !connected }">
-              {{ connected ? `发送到 ${targetName}` : "当前终端未连接" }}
+              {{ connected ? t("runner.target", { name: targetName }) : t("runner.disconnected") }}
             </span>
           </div>
-          <button class="code-close" title="关闭" @click="open = false">×</button>
+          <button class="code-close" :title="t('common.close')" @click="open = false">×</button>
         </header>
 
         <div class="drawer-body">
@@ -96,14 +98,16 @@ function pasteSnippet(snippet: Snippet) {
                   <span class="code-item-meta">{{ firstLine(s.code) }}</span>
                 </span>
                 <div class="item-actions">
-                  <button class="act-btn" title="执行" @click="runSnippet(s)">执行</button>
-                  <button class="act-btn" title="粘贴到终端" @click="pasteSnippet(s)">
-                    粘贴
+                  <button class="act-btn" :title="t('runner.run')" @click="runSnippet(s)">
+                    {{ t("runner.run") }}
+                  </button>
+                  <button class="act-btn" :title="t('runner.paste')" @click="pasteSnippet(s)">
+                    {{ t("runner.paste") }}
                   </button>
                 </div>
               </div>
               <p v-if="!snippets.length" class="code-empty">
-                还没有代码块<br />可在左侧「代码块」中添加
+                {{ t("runner.empty") }}<br />{{ t("runner.emptyHint") }}
               </p>
             </div>
           </section>

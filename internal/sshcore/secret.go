@@ -36,19 +36,19 @@ func loadOrCreateMasterKey() ([]byte, error) {
 	key, err := os.ReadFile(path)
 	if err == nil {
 		if len(key) != 32 {
-			return nil, fmt.Errorf("主密钥文件 %s 已损坏（长度 %d），请备份后删除该文件再重新输入密码", path, len(key))
+			return nil, fmt.Errorf("master key file %s is corrupted (length %d); back it up, delete the file and re-enter the password", path, len(key))
 		}
 		return key, nil
 	}
 	if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("无法读取主密钥文件: %w", err)
+		return nil, fmt.Errorf("failed to read master key file: %w", err)
 	}
 	key = make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("无法生成主密钥: %w", err)
+		return nil, fmt.Errorf("failed to generate master key: %w", err)
 	}
 	if err := os.WriteFile(path, key, 0o600); err != nil {
-		return nil, fmt.Errorf("无法写入主密钥文件: %w", err)
+		return nil, fmt.Errorf("failed to write master key file: %w", err)
 	}
 	return key, nil
 }
@@ -69,7 +69,7 @@ func encryptSecret(plain string) (string, error) {
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("无法生成随机数: %w", err)
+		return "", fmt.Errorf("failed to generate random number: %w", err)
 	}
 	sealed := gcm.Seal(nonce, nonce, []byte(plain), nil)
 	return encodedPrefix + base64.StdEncoding.EncodeToString(sealed), nil
@@ -90,7 +90,7 @@ func decryptSecret(stored string) (string, error) {
 	}
 	raw, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
-		return "", fmt.Errorf("密文格式无效: %w", err)
+		return "", fmt.Errorf("invalid ciphertext format: %w", err)
 	}
 	key, err := keyOnce()
 	if err != nil {
@@ -101,11 +101,11 @@ func decryptSecret(stored string) (string, error) {
 		return "", err
 	}
 	if len(raw) < gcm.NonceSize() {
-		return "", fmt.Errorf("密文长度无效")
+		return "", fmt.Errorf("invalid ciphertext length")
 	}
 	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
 	if err != nil {
-		return "", fmt.Errorf("解密失败: %w", err)
+		return "", fmt.Errorf("decryption failed: %w", err)
 	}
 	return string(plain), nil
 }

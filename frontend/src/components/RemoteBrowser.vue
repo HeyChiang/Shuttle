@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 独立的远端目录浏览器：基于 SFTP token 工作，不依赖终端会话。
 import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { RemoteFile } from "../../bindings/shuttle/internal/sshcore/models";
 import { beginSftpDrag, endSftpDrag, sftpDrag } from "../sftpDrag";
@@ -15,6 +16,8 @@ const emit = defineEmits<{
   (e: "update:cwd", v: string): void;
   (e: "drop-files", paths: string[], dir: string): void;
 }>();
+
+const { t } = useI18n();
 
 const cwd = ref("");
 const pathInput = ref("");
@@ -95,7 +98,7 @@ async function open(dir: string) {
     pathInput.value = dir;
     emit("update:cwd", dir);
   } catch (e) {
-    error.value = `读取目录失败：${String(e)}`;
+    error.value = t("browser.readDirFailed", { error: String(e) });
   } finally {
     busy.value = false;
   }
@@ -107,7 +110,7 @@ async function goHome() {
     const home = await SSH.SftpHome(props.token);
     await open(home || "/");
   } catch (e) {
-    error.value = `获取家目录失败：${String(e)}`;
+    error.value = t("browser.homeFailed", { error: String(e) });
   }
 }
 
@@ -218,16 +221,31 @@ watch(
     @drop.prevent="onDrop"
   >
     <div class="bar">
-      <button class="icon" :disabled="!ready || busy" title="上级目录" @click="goParent">
+      <button
+        class="icon"
+        :disabled="!ready || busy"
+        :title="t('browser.parent')"
+        @click="goParent"
+      >
         <svg viewBox="0 0 16 16"><path d="M13 8H3.5M7.5 4L3.5 8l4 4" /></svg>
       </button>
-      <button class="icon" :disabled="!ready || busy" title="家目录" @click="goHome">
+      <button
+        class="icon"
+        :disabled="!ready || busy"
+        :title="t('browser.home')"
+        @click="goHome"
+      >
         <svg viewBox="0 0 16 16">
           <path d="M2.5 7.2L8 3l5.5 4.2v5.6a.7.7 0 0 1-.7.7H3.2a.7.7 0 0 1-.7-.7z" />
           <path d="M6.4 13.5V9.8h3.2v3.7" />
         </svg>
       </button>
-      <button class="icon" :disabled="!ready || busy" title="刷新" @click="refresh">
+      <button
+        class="icon"
+        :disabled="!ready || busy"
+        :title="t('browser.refresh')"
+        @click="refresh"
+      >
         <svg viewBox="0 0 16 16">
           <path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8" />
           <path d="M13.4 2.6v3h-3" />
@@ -242,14 +260,14 @@ watch(
       />
     </div>
 
-    <p v-if="!ready" class="hint">请先选择服务器</p>
+    <p v-if="!ready" class="hint">{{ t("browser.selectServer") }}</p>
     <p v-else-if="error" class="err">{{ error }}</p>
 
     <div v-else class="list" @click.self="clearSelection">
       <div class="row head">
-        <span class="c-name">名称</span>
-        <span class="c-size">大小</span>
-        <span class="c-time">修改时间</span>
+        <span class="c-name">{{ t("common.name") }}</span>
+        <span class="c-size">{{ t("common.size") }}</span>
+        <span class="c-time">{{ t("common.modified") }}</span>
       </div>
 
       <div
@@ -282,8 +300,8 @@ watch(
         <span class="c-time">{{ stamp(entry.modTime) }}</span>
       </div>
 
-      <p v-if="!entries.length && !busy" class="empty">目录为空</p>
-      <p v-if="busy" class="empty">正在读取…</p>
+      <p v-if="!entries.length && !busy" class="empty">{{ t("browser.emptyDir") }}</p>
+      <p v-if="busy" class="empty">{{ t("browser.loading") }}</p>
     </div>
   </div>
 </template>

@@ -22,7 +22,7 @@ func authMethodsFor(cfg HostConfig) ([]ssh.AuthMethod, error) {
 	case AuthAgent:
 		agentClient, _, err := sshagent.New()
 		if err != nil {
-			return nil, fmt.Errorf("无法连接 ssh-agent: %w", err)
+			return nil, fmt.Errorf("failed to connect to ssh-agent: %w", err)
 		}
 		methods = append(methods, ssh.PublicKeysCallback(agentClient.Signers))
 	default:
@@ -59,12 +59,12 @@ func dialClient(cfg HostConfig) (*ssh.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprint(cfg.Port))
 	conn, err := net.DialTimeout("tcp", addr, clientCfg.Timeout)
 	if err != nil {
-		return nil, fmt.Errorf("连接 %s 失败: %w", addr, err)
+		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientCfg)
 	if err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("SSH 握手失败: %w", err)
+		return nil, fmt.Errorf("SSH handshake failed: %w", err)
 	}
 	return ssh.NewClient(sshConn, chans, reqs), nil
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 单个终端面板：xterm.js 实例 + 尺寸同步 + 数据路由。
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { Clipboard } from "@wailsio/runtime";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -31,6 +32,8 @@ const emit = defineEmits<{
   (e: "pane-drag-start", id: string, ev: PointerEvent): void;
 }>();
 
+const { t } = useI18n();
+
 const paneEl = ref<HTMLDivElement>();
 const bodyEl = ref<HTMLDivElement>();
 const term = shallowRef<Terminal>();
@@ -46,13 +49,13 @@ const connecting = computed(() => props.session.status === "connecting");
 const statusText = computed(() => {
   switch (props.session.status) {
     case "connected":
-      return "已连接";
+      return t("session.connected");
     case "connecting":
-      return "连接中";
+      return t("session.connecting");
     case "error":
-      return "连接失败";
+      return t("session.failed");
     default:
-      return "已断开";
+      return t("session.disconnected");
   }
 });
 
@@ -308,7 +311,7 @@ function focus() {
       <span class="pane-host">{{ session.user }}@{{ session.host }}:{{ session.port }}</span>
       <button
         class="pane-close"
-        title="关闭此终端"
+        :title="t('session.closePane')"
         draggable="false"
         @mousedown.stop
         @click.stop="emit('close')"
@@ -326,7 +329,7 @@ function focus() {
         <span class="overlay-title" :class="{ err: !connecting }">{{ statusText }}</span>
         <p v-if="connecting" class="overlay-sub">{{ session.user }}@{{ session.host }}:{{ session.port }}</p>
         <p v-if="failMessage" class="overlay-msg">{{ failMessage }}</p>
-        <button v-if="canRetry" class="overlay-retry" @click="retry">重新连接</button>
+        <button v-if="canRetry" class="overlay-retry" @click="retry">{{ t("session.reconnect") }}</button>
       </div>
     </div>
   </section>

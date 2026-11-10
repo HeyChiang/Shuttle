@@ -67,15 +67,15 @@ func (s *SSHService) ExportHosts(passphrase string) (string, error) {
 		return "", err
 	}
 	if len(hosts) == 0 {
-		return "", fmt.Errorf("还没有可导出的主机")
+		return "", fmt.Errorf("no hosts to export")
 	}
 	dialog := saveFileDialog()
 	if dialog == nil {
-		return "", fmt.Errorf("应用尚未就绪")
+		return "", fmt.Errorf("application is not ready")
 	}
-	dialog.SetMessage("导出主机配置")
+	dialog.SetMessage("Export host profiles")
 	dialog.SetFilename("shuttle-hosts-" + time.Now().Format("20060102") + ".json")
-	dialog.AddFilter("JSON 文件", "*.json")
+	dialog.AddFilter("JSON files", "*.json")
 	path, err := dialog.PromptForSingleSelection()
 	if err != nil {
 		return "", err
@@ -89,13 +89,13 @@ func (s *SSHService) ExportHosts(passphrase string) (string, error) {
 	}
 	// 文件可能含凭据，权限尽量收紧。
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return "", fmt.Errorf("写入导出文件失败: %w", err)
+		return "", fmt.Errorf("failed to write export file: %w", err)
 	}
 	return path, nil
 }
 
 // errImportNeedsPassword 表示文件已加密但尚未提供密码，前端据此弹出密码框。
-const errImportNeedsPassword = "该文件已加密，请输入导入密码"
+const errImportNeedsPassword = "the file is encrypted, please enter the import password"
 
 // ImportHosts reads profiles from a JSON file chosen by the user. Encrypted
 // files need a passphrase; when it is missing the selected path is kept so the
@@ -107,10 +107,10 @@ func (s *SSHService) ImportHosts(passphrase string) ([]sshcore.HostConfig, error
 	if path == "" {
 		dialog := openFileDialog()
 		if dialog == nil {
-			return nil, fmt.Errorf("应用尚未就绪")
+			return nil, fmt.Errorf("application is not ready")
 		}
-		dialog.SetTitle("导入主机配置")
-		dialog.AddFilter("JSON 文件", "*.json")
+		dialog.SetTitle("Import host profiles")
+		dialog.AddFilter("JSON files", "*.json")
 		var err error
 		path, err = dialog.PromptForSingleSelection()
 		if err != nil {
@@ -122,7 +122,7 @@ func (s *SSHService) ImportHosts(passphrase string) ([]sshcore.HostConfig, error
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读取导入文件失败: %w", err)
+		return nil, fmt.Errorf("failed to read import file: %w", err)
 	}
 	if sshcore.ExportNeedsPassphrase(data) && strings.TrimSpace(passphrase) == "" {
 		s.pendingImportPath = path
@@ -183,7 +183,7 @@ func (s *SSHService) Resize(ids []string, cols, rows int) {
 // through the "ssh:exec" event.
 func (s *SSHService) Exec(ids []string, command string) error {
 	if strings.TrimSpace(command) == "" {
-		return fmt.Errorf("命令不能为空")
+		return fmt.Errorf("command must not be empty")
 	}
 	s.mgr.Exec(ids, command)
 	return nil
@@ -224,7 +224,7 @@ func (s *SSHService) Upload(id, remoteDir string, localPaths []string) error {
 // UploadMany copies the given local paths into remoteDir of several sessions.
 func (s *SSHService) UploadMany(ids []string, remoteDir string, localPaths []string) error {
 	if len(ids) == 0 {
-		return fmt.Errorf("请至少选择一个会话")
+		return fmt.Errorf("please select at least one session")
 	}
 	var firstErr error
 	for _, id := range ids {
@@ -332,9 +332,9 @@ func saveFileDialog() *application.SaveFileDialogStruct {
 func (s *SSHService) PickFiles(title string) ([]string, error) {
 	dialog := openFileDialog()
 	if dialog == nil {
-		return nil, fmt.Errorf("应用尚未就绪")
+		return nil, fmt.Errorf("application is not ready")
 	}
-	dialog.SetTitle(orDefault(title, "选择要上传的文件"))
+	dialog.SetTitle(orDefault(title, "Select files to upload"))
 	result, err := dialog.PromptForMultipleSelection()
 	if err != nil {
 		return nil, err
@@ -346,9 +346,9 @@ func (s *SSHService) PickFiles(title string) ([]string, error) {
 func (s *SSHService) PickFile(title string) (string, error) {
 	dialog := openFileDialog()
 	if dialog == nil {
-		return "", fmt.Errorf("应用尚未就绪")
+		return "", fmt.Errorf("application is not ready")
 	}
-	dialog.SetTitle(orDefault(title, "选择文件"))
+	dialog.SetTitle(orDefault(title, "Select file"))
 	result, err := dialog.PromptForSingleSelection()
 	if err != nil {
 		return "", err
@@ -360,11 +360,11 @@ func (s *SSHService) PickFile(title string) (string, error) {
 func (s *SSHService) PickDirectory(title string) (string, error) {
 	dialog := openFileDialog()
 	if dialog == nil {
-		return "", fmt.Errorf("应用尚未就绪")
+		return "", fmt.Errorf("application is not ready")
 	}
 	dialog.CanChooseDirectories(true)
 	dialog.CanChooseFiles(false)
-	dialog.SetTitle(orDefault(title, "选择目录"))
+	dialog.SetTitle(orDefault(title, "Select directory"))
 	result, err := dialog.PromptForSingleSelection()
 	if err != nil {
 		return "", err

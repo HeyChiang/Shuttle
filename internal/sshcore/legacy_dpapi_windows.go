@@ -33,11 +33,11 @@ type dataBlob struct {
 func decryptLegacyDPAPI(stored string) (string, error) {
 	payload, ok := strings.CutPrefix(stored, legacyDPAPIPrefix)
 	if !ok {
-		return "", fmt.Errorf("不是 DPAPI 密文")
+		return "", fmt.Errorf("not DPAPI ciphertext")
 	}
 	raw, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
-		return "", fmt.Errorf("密文格式无效: %w", err)
+		return "", fmt.Errorf("invalid ciphertext format: %w", err)
 	}
 	if len(raw) == 0 {
 		return "", nil
@@ -55,7 +55,7 @@ func decryptLegacyDPAPI(stored string) (string, error) {
 	)
 	runtime.KeepAlive(raw)
 	if ret == 0 {
-		return "", fmt.Errorf("DPAPI 解密失败（可能不是原 Windows 账户）: %w", callErr)
+		return "", fmt.Errorf("DPAPI decryption failed (possibly not the original Windows account): %w", callErr)
 	}
 	defer procLocalFree.Call(uintptr(unsafe.Pointer(out.pbData)))
 	return string(unsafe.Slice(out.pbData, out.cbData)), nil

@@ -1,6 +1,7 @@
 // 代码块：保存可复用的脚本片段，SSH 终端页可引入后执行。
 // 数据量小且无敏感信息，直接持久化到 localStorage。
 import { ref, watch } from "vue";
+import { t } from "./i18n";
 
 export interface Snippet {
   id: string;
@@ -56,7 +57,7 @@ export function blankSnippet(): Snippet {
 
 /** 新增或更新代码块，未命名时用首行内容兜底 */
 export function upsertSnippet(snippet: Snippet) {
-  const name = snippet.name.trim() || firstLine(snippet.code) || "未命名代码块";
+  const name = snippet.name.trim() || firstLine(snippet.code) || t("snippets.unnamed");
   const next: Snippet = { ...snippet, name, updatedAt: Date.now() };
   const idx = snippets.value.findIndex((s) => s.id === next.id);
   if (idx >= 0) snippets.value[idx] = next;

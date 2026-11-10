@@ -12,7 +12,7 @@ import (
 func LocalHome() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("获取本地家目录失败: %w", err)
+		return "", fmt.Errorf("failed to get local home directory: %w", err)
 	}
 	return home, nil
 }
@@ -31,7 +31,7 @@ func LocalDrives() ([]string, error) {
 		}
 	}
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("未找到可用的磁盘")
+		return nil, fmt.Errorf("no available drives found")
 	}
 	return roots, nil
 }
@@ -47,11 +47,11 @@ func LocalList(dir string) ([]RemoteFile, error) {
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, fmt.Errorf("解析本地路径失败: %w", err)
+		return nil, fmt.Errorf("failed to resolve local path: %w", err)
 	}
 	entries, err := os.ReadDir(abs)
 	if err != nil {
-		return nil, fmt.Errorf("读取目录 %s 失败: %w", abs, err)
+		return nil, fmt.Errorf("failed to read directory %s: %w", abs, err)
 	}
 
 	out := make([]RemoteFile, 0, len(entries))

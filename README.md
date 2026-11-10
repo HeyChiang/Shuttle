@@ -1,59 +1,64 @@
-# Welcome to Your New Wails3 Project!
+# Shuttle
 
-Congratulations on generating your Wails3 application! This README will guide you through the next steps to get your project up and running.
+A desktop SSH manager for working with many servers at once — built with [Wails v3](https://v3.wails.io/), Go and Vue 3.
 
-## Getting Started
+English | [简体中文](README.zh-CN.md) | [Español](README.es.md)
 
-1. Navigate to your project directory in the terminal.
+## Features
 
-2. To run your application in development mode, use the following command:
+- **Saved hosts** — keep connection profiles (host, port, user, password / private key, terminal type, encoding) and group them.
+- **Multi-session terminals** — open as many SSH sessions as you need, switch with tabs, split them into a grid layout, or send input to several sessions at once (broadcast mode).
+- **SFTP workspace** — a two-pane file manager where each side can independently browse the local disk or a remote server, with drag-and-drop upload, download and server-to-server transfer.
+- **Snippets** — store frequently used command scripts and run or paste them into the focused terminal from a side drawer.
+- **Encrypted import / export** — back up and restore your host list as a passphrase-protected file.
+- **Themes and typography** — light / dark appearance and adjustable terminal font size.
+- **Trilingual UI** — English, Simplified Chinese and Spanish, switchable at runtime from Settings → Language.
 
-   ```
-   wails3 dev
-   ```
+## Requirements
 
-   This will start your application and enable hot-reloading for both frontend and backend changes.
+- Go 1.26+
+- Node.js 18+ and npm
+- The [Wails v3 CLI](https://v3.wails.io/getting-started/installation/) and [Task](https://taskfile.dev/)
 
-3. To build your application for production, use:
+## Development
 
-   ```
-   wails3 build
-   ```
+```bash
+# install frontend dependencies
+cd frontend && npm install && cd ..
 
-   This will create a production-ready executable in the `build` directory.
+# run in development mode with hot reload
+wails3 dev
+```
 
-## Exploring Wails3 Features
+## Build
 
-Now that you have your project set up, it's time to explore the features that Wails3 offers:
+```bash
+wails3 build
+```
 
-1. **Check out the examples**: The best way to learn is by example. Visit the `examples` directory in the `v3/examples` directory to see various sample applications.
+The executable is written to `bin/`.
 
-2. **Run an example**: To run any of the examples, navigate to the example's directory and use:
+## Project layout
 
-   ```
-   go run .
-   ```
+```
+.
+├── main.go              # application entry point and window setup
+├── sshservice.go        # Wails service exposed to the frontend
+├── internal/sshcore/    # SSH sessions, SFTP, host storage, crypto
+├── frontend/src/        # Vue 3 app
+│   ├── App.vue          # main window, tabs, host list, settings
+│   ├── components/      # terminal pane, SFTP panes, dialogs
+│   └── locales/         # en / zh-CN / es message catalogs
+└── build/               # platform build assets and Taskfiles
+```
 
-   Note: Some examples may be under development during the alpha phase.
+## Internationalization
 
-3. **Explore the documentation**: Visit the [Wails3 documentation](https://v3.wails.io/) for in-depth guides and API references.
+All UI strings live in `frontend/src/locales`. The active language is detected from the browser locale on first launch, then persisted in `localStorage` under `shuttle.locale`. Adding a language means:
 
-4. **Join the community**: Have questions or want to share your progress? Join the [Wails Discord](https://discord.gg/JDdSxwjhGf) or visit the [Wails discussions on GitHub](https://github.com/wailsapp/wails/discussions).
+1. Create `frontend/src/locales/<locale>.ts` by copying `en.ts`.
+2. Register it in `frontend/src/i18n.ts` (`messages` and `localeOptions`).
 
-## Project Structure
+## Contributing
 
-Take a moment to familiarize yourself with your project structure:
-
-- `frontend/`: Contains your frontend code (HTML, CSS, JavaScript/TypeScript)
-- `main.go`: The entry point of your Go backend
-- `app.go`: Define your application structure and methods here
-- `wails.json`: Configuration file for your Wails project
-
-## Next Steps
-
-1. Modify the frontend in the `frontend/` directory to create your desired UI.
-2. Add backend functionality in `main.go`.
-3. Use `wails3 dev` to see your changes in real-time.
-4. When ready, build your application with `wails3 build`.
-
-Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+Issues and pull requests are welcome. Please keep new UI text in the locale catalogs rather than hard-coding it in components.

@@ -2,6 +2,8 @@
 // Shuttle 主界面：顶部 SFTP / 主页 / 搜索，主体在主页、终端、SFTP 之间切换。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Clipboard, Window } from "@wailsio/runtime";
+import { useI18n } from "vue-i18n";
+import { localeOptions, setLocale, type Locale } from "./i18n";
 import * as SSH from "../bindings/shuttle/sshservice";
 import type { HostConfig } from "../bindings/shuttle/internal/sshcore/models";
 import HostDialog from "./components/HostDialog.vue";
@@ -50,6 +52,8 @@ import {
   type ThemeMode,
 } from "./theme";
 
+const { t, locale } = useI18n();
+
 const query = ref("");
 const dialogOpen = ref(false);
 const editing = ref<HostConfig | null>(null);
@@ -64,16 +68,23 @@ const sessionMenuOpen = ref(false);
 /** 左侧栏设置入口 */
 const settingsOpen = ref(false);
 const settingsMaskEl = ref<HTMLElement>();
-/** 设置左栏选中项：导入、导出与主题、字号 */
-const settingsTab = ref<"import" | "export" | "theme" | "font">("import");
+/** 设置左栏选中项：导入、导出、主题、字号与语言 */
+const settingsTab = ref<"import" | "export" | "theme" | "font" | "language">("import");
 /** 「外观」二级菜单是否展开 */
 const appearanceOpen = ref(true);
 /** 主题选项：跟随系统 / 浅色 / 深色 */
-const themeOptions: { value: ThemeMode; label: string }[] = [
-  { value: "system", label: "跟随系统" },
-  { value: "light", label: "浅色" },
-  { value: "dark", label: "深色" },
-];
+const themeOptions = computed<{ value: ThemeMode; label: string }[]>(() => [
+  { value: "system", label: t("settings.themeSystem") },
+  { value: "light", label: t("settings.themeLight") },
+  { value: "dark", label: t("settings.themeDark") },
+]);
+
+/** 切换界面语言，并同步窗口标题 */
+function changeLocale(next: Locale) {
+  setLocale(next);
+  void Window.SetTitle(t("app.title"));
+}
+
 
 /** 打开设置弹窗后聚焦遮罩，让 Esc 可以直接关闭 */
 watch(settingsOpen, async (open) => {
@@ -123,20 +134,20 @@ const hiddenSessions = computed(() => {
 });
 
 /** 标签主标题：合并组显示为「工作组」，数量由角标显示 */
-function tabLabel(t: SessionTab): string {
-  return t.group ? "工作组" : sessionLabel(t.sessions[0]);
+function tabLabel(tab: SessionTab): string {
+  return tab.group ? t("tabs.group") : sessionLabel(tab.sessions[0]);
 }
 
 /** 标签悬浮提示：列出组内全部服务器 */
-function tabTitle(t: SessionTab): string {
-  return t.sessions
+function tabTitle(tab: SessionTab): string {
+  return tab.sessions
     .map((s) => `${sessionLabel(s)} · ${s.user}@${s.host}:${s.port}`)
     .join("\n");
 }
 
 /** 标签状态点：优先显示最严重的状态 */
-function tabStatus(t: SessionTab): string {
-  const statuses = t.sessions.map((s) => s.status);
+function tabStatus(tab: SessionTab): string {
+  const statuses = tab.sessions.map((s) => s.status);
   if (statuses.includes("error")) return "error";
   if (statuses.includes("connecting")) return "connecting";
   if (statuses.every((s) => s === "connected")) return "connected";
@@ -385,10 +396,10 @@ function isPaneVisible(id: string): boolean {
 
 /** 拆分当前合并标签，恢复为各自独立的终端 */
 function splitActiveTab() {
-  const t = activeTab.value;
-  if (!t || !t.group) return;
-  splitGroup(t.sessions[0].id);
-  activeId.value = t.sessions[0].id;
+  const tab = activeTab.value;
+  if (!tab || !tab.group) return;
+  splitGroup(tab.sessions[0].id);
+  activeId.value = tab.sessions[0].id;
 }
 
 /** 递归平分布局树，得到每个终端面板的百分比区域 */
@@ -420,11 +431,11 @@ function collectRects(node: SplitNode, rect: PaneRect, out: Map<string, PaneRect
 /** 当前工作组内各终端面板的位置：嵌套分屏只影响被拖入的那个面板 */
 const paneRects = computed(() => {
   const out = new Map<string, PaneRect>();
-  const t = activeTab.value;
-  if (!t) return out;
-  const group = splitGroupOf(t.sessions[0].id);
+  const tab = activeTab.value;
+  if (!tab) return out;
+  const group = splitGroupOf(tab.sessions[0].id);
   if (!group) {
-    out.set(t.sessions[0].id, { left: 0, top: 0, width: 100, height: 100 });
+    out.set(tab.sessions[0].id, { left: 0, top: 0, width: 100, height: 100 });
     return out;
   }
   collectRects(group.layout, { left: 0, top: 0, width: 100, height: 100 }, out);
@@ -597,9 +608,9 @@ function initialOf(name: string): string {
 }
 
 function authLabel(h: HostConfig): string {
-  if (h.authMethod === "key") return "私钥";
+  if (h.authMethod === "key") return t("hostDialog.authKey");
   if (h.authMethod === "agent") return "SSH Agent";
-  return "密码";
+  return t("hostDialog.authPassword");
 }
 
 const filteredHosts = computed(() => {
@@ -614,7 +625,7 @@ const filteredHosts = computed(() => {
 const groupedHosts = computed(() => {
   const groups = new Map<string, HostConfig[]>();
   for (const h of filteredHosts.value) {
-    const key = h.group?.trim() || "默认分组";
+    const key = h.group?.trim() || t("group.default");
     const list = groups.get(key);
     if (list) list.push(h);
     else groups.set(key, [h]);
@@ -709,7 +720,7 @@ function duplicateHost(host: HostConfig) {
   const copy: HostConfig = {
     ...host,
     id: `${host.id}-copy-${Date.now().toString(36)}`,
-    name: `${host.name || host.host} 副本`,
+    name: t("session.copyN", { base: host.name || host.host, n: 1 }),
   };
   void persistHosts([...hosts.value, copy]);
 }
@@ -760,12 +771,12 @@ function closeTransfer() {
 /** 直接导出明文 JSON；加密是可选项，只有主动点击加密导出才会输入密码。 */
 async function askExportHosts() {
   if (!hosts.value.length) {
-    showNotice("还没有可导出的主机");
+    showNotice(t("transfer.noHosts"));
     return;
   }
   try {
     const path = await SSH.ExportHosts("");
-    if (path) showNotice(`已导出到 ${path}`);
+    if (path) showNotice(t("transfer.exported", { path }));
   } catch (e) {
     showNotice(String(e));
   }
@@ -774,7 +785,7 @@ async function askExportHosts() {
 /** 加密导出：为文件中的凭据额外设置密码。 */
 function askEncryptedExport() {
   if (!hosts.value.length) {
-    showNotice("还没有可导出的主机");
+    showNotice(t("transfer.noHosts"));
     return;
   }
   void openTransfer("export");
@@ -786,7 +797,7 @@ async function askImportHosts() {
     await finishImport("");
   } catch (e) {
     // 后端已记住所选文件，输入密码后无需重新选择。
-    if (String(e).includes("已加密")) {
+    if (String(e).includes("已加密") || String(e).toLowerCase().includes("encrypted")) {
       void openTransfer("import");
       return;
     }
@@ -802,17 +813,17 @@ function submitTransfer() {
 async function exportHosts() {
   const password = transferPassword.value;
   if (!password) {
-    transferError.value = "请输入加密密码";
+    transferError.value = t("transfer.errPassword");
     return;
   }
   if (password !== transferConfirm.value) {
-    transferError.value = "两次输入的密码不一致";
+    transferError.value = t("transfer.errMismatch");
     return;
   }
   try {
     const path = await SSH.ExportHosts(password);
     resetTransfer();
-    if (path) showNotice(`已导出到 ${path}`);
+    if (path) showNotice(t("transfer.exported", { path }));
   } catch (e) {
     transferError.value = String(e);
   }
@@ -820,7 +831,7 @@ async function exportHosts() {
 
 async function submitImport() {
   if (!transferPassword.value) {
-    transferError.value = "请输入文件密码";
+    transferError.value = t("transfer.errFilePassword");
     return;
   }
   try {
@@ -851,12 +862,14 @@ async function finishImport(password: string) {
   }
   if (!added.length) {
     resetTransfer();
-    showNotice(list.length ? "导入完成：没有新增主机（均已存在）" : "文件里没有主机配置");
+    showNotice(
+      list.length ? t("transfer.importNone") : t("transfer.importEmpty"),
+    );
     return;
   }
   await persistHosts([...hosts.value, ...added]);
   resetTransfer();
-  showNotice(`已导入 ${added.length} 台主机`);
+  showNotice(t("transfer.imported", { n: added.length }));
 }
 
 // ---------------------------------------------------------------- 代码块
@@ -995,14 +1008,14 @@ function closeSession(id: string) {
         class="tb-btn"
         style="--wails-draggable: no-drag"
         :class="{ on: page === 'home' }"
-        title="主页"
+        :title="t('app.navHome')"
         @click="page = 'home'"
       >
         <svg viewBox="0 0 20 20">
           <path d="M3.2 9.6L10 4l6.8 5.6" />
           <path d="M5.4 8.8v6.6a1 1 0 0 0 1 1h7.2a1 1 0 0 0 1-1V8.8" />
         </svg>
-        主页
+        {{ t("app.navHome") }}
       </button>
 
       <button
@@ -1010,7 +1023,7 @@ function closeSession(id: string) {
         style="--wails-draggable: no-drag"
         :class="{ on: page === 'sftp' }"
         :disabled="!hosts.length"
-        :title="hosts.length ? '本地上传 / 远程下载 / 服务器互传' : '请先添加服务器'"
+        :title="hosts.length ? t('app.sftpTip') : t('app.sftpNeedHost')"
         @click="page = 'sftp'"
       >
         <svg viewBox="0 0 20 20">
@@ -1030,25 +1043,29 @@ function closeSession(id: string) {
       >
         <div v-if="visibleTabs.length" class="tb-tabs">
           <button
-            v-for="t in visibleTabs"
-            :key="t.key"
+            v-for="tab in visibleTabs"
+            :key="tab.key"
             class="tb-tab"
             :class="{
-              on: page === 'term' && t.key === activeTab?.key,
-              drop: dropTabKey === t.key,
-              dragging: dragTabKey === t.key,
+              on: page === 'term' && tab.key === activeTab?.key,
+              drop: dropTabKey === tab.key,
+              dragging: dragTabKey === tab.key,
             }"
-            :title="tabTitle(t)"
-            :data-tab-key="t.key"
-            @pointerdown="onTabPointerDown($event, t)"
-            @click="onTabClick(t)"
+            :title="tabTitle(tab)"
+            :data-tab-key="tab.key"
+            @pointerdown="onTabPointerDown($event, tab)"
+            @click="onTabClick(tab)"
           >
-            <span class="dot" :class="tabStatus(t)" />
-            <span v-if="t.group" class="tb-group" :title="`${t.sessions.length} 个终端并排显示`">
-              {{ t.sessions.length }}
+            <span class="dot" :class="tabStatus(tab)" />
+            <span
+              v-if="tab.group"
+              class="tb-group"
+              :title="t('tabs.groupHint', { n: tab.sessions.length })"
+            >
+              {{ tab.sessions.length }}
             </span>
-            <span class="tb-tab-label">{{ tabLabel(t) }}</span>
-            <span class="x" title="断开" @click.stop="closeTab(t)">×</span>
+            <span class="tb-tab-label">{{ tabLabel(tab) }}</span>
+            <span class="x" :title="t('tabs.disconnect')" @click.stop="closeTab(tab)">×</span>
           </button>
         </div>
 
@@ -1057,7 +1074,7 @@ function closeSession(id: string) {
           ref="moreBtnEl"
           class="tb-btn tb-session-btn tb-more"
           :class="{ on: sessionMenuOpen }"
-          :title="`还有 ${hiddenSessions.length} 个终端`"
+          :title="t('tabs.moreTitle', { n: hiddenSessions.length })"
           @click.stop="toggleSessionMenu"
         >
           <svg viewBox="0 0 20 20">
@@ -1072,7 +1089,7 @@ function closeSession(id: string) {
             <input
               ref="sessionInput"
               v-model="sessionQuery"
-              placeholder="搜索已打开的终端"
+              :placeholder="t('tabs.searchOpen')"
               @keydown.esc="sessionMenuOpen = false"
             />
           </div>
@@ -1087,10 +1104,10 @@ function closeSession(id: string) {
             >
               <span class="dot" :class="s.status" />
               <span class="sp-name">{{ sessionLabel(s) }}</span>
-              <span class="x" title="断开" @click.stop="closeSession(s.id)">×</span>
+              <span class="x" :title="t('tabs.disconnect')" @click.stop="closeSession(s.id)">×</span>
             </div>
             <p v-if="!filteredSessions.length" class="sp-empty">
-              {{ sessionQuery.trim() ? "没有匹配的终端" : "没有已打开的终端" }}
+              {{ sessionQuery.trim() ? t("tabs.noMatch") : t("tabs.noneOpen") }}
             </p>
           </div>
         </div>
@@ -1111,7 +1128,7 @@ function closeSession(id: string) {
         <button
           class="tb-btn tb-plus"
           :class="{ on: searchOpen }"
-          title="搜索并连接服务器"
+          :title="t('search.tip')"
           @click.stop="toggleSearch"
         >
           <svg viewBox="0 0 20 20">
@@ -1124,7 +1141,7 @@ function closeSession(id: string) {
             <input
               ref="searchInput"
               v-model="query"
-              placeholder="搜索主机"
+              :placeholder="t('search.hostPlaceholder')"
               @keydown.esc="searchOpen = false"
               @keydown.enter="openFirstMatch"
             />
@@ -1141,7 +1158,7 @@ function closeSession(id: string) {
               <span class="sp-meta">{{ h.user }}@{{ h.host }}:{{ h.port }}</span>
             </button>
             <p v-if="!filteredHosts.length" class="sp-empty">
-              {{ query.trim() ? "没有匹配的服务器" : "还没有保存的服务器" }}
+              {{ query.trim() ? t("search.noMatch") : t("search.noSaved") }}
             </p>
           </div>
         </div>
@@ -1153,10 +1170,10 @@ function closeSession(id: string) {
       <ScriptRunner v-if="page === 'term'" />
 
       <div class="tb-controls" style="--wails-draggable: no-drag">
-        <button class="win-btn" title="最小化" @click="minimise">
+        <button class="win-btn" :title="t('app.winMinimise')" @click="minimise">
           <svg viewBox="0 0 10 10"><path d="M0 5h10" /></svg>
         </button>
-        <button class="win-btn" :title="isMax ? '还原' : '最大化'" @click="toggleMax">
+        <button class="win-btn" :title="isMax ? t('app.winRestore') : t('app.winMaximise')" @click="toggleMax">
           <svg v-if="!isMax" viewBox="0 0 10 10">
             <rect x="0.5" y="0.5" width="9" height="9" fill="none" />
           </svg>
@@ -1165,7 +1182,7 @@ function closeSession(id: string) {
             <path d="M2.5 2.5V0.5h7v7h-2" fill="none" />
           </svg>
         </button>
-        <button class="win-btn close" title="关闭" @click="closeWin">
+        <button class="win-btn close" :title="t('app.winClose')" @click="closeWin">
           <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" /></svg>
         </button>
       </div>
@@ -1181,7 +1198,7 @@ function closeSession(id: string) {
         <button
           class="rail-item"
           :class="{ on: page === 'home' }"
-          title="主机"
+          :title="t('app.navHosts')"
           @click="page = 'home'"
         >
           <svg viewBox="0 0 20 20">
@@ -1189,13 +1206,13 @@ function closeSession(id: string) {
             <rect x="3.2" y="11" width="13.6" height="5.4" rx="1.4" />
             <path d="M6.2 6.3h2.2M6.2 13.7h2.2" />
           </svg>
-          <span>主机</span>
+          <span>{{ t("app.navHosts") }}</span>
         </button>
 
         <button
           class="rail-item"
           :class="{ on: page === 'snippets' }"
-          title="代码块"
+          :title="t('app.navSnippets')"
           @click="page = 'snippets'"
         >
           <svg viewBox="0 0 20 20">
@@ -1203,7 +1220,7 @@ function closeSession(id: string) {
             <path d="M12.6 5.4L17 10l-4.4 4.6" />
             <path d="M10.9 3.8l-1.8 12.4" />
           </svg>
-          <span>代码块</span>
+          <span>{{ t("app.navSnippets") }}</span>
         </button>
       </nav>
 
@@ -1211,7 +1228,7 @@ function closeSession(id: string) {
         <button
           class="rail-item"
           :class="{ on: settingsOpen }"
-          title="设置"
+          :title="t('app.navSettings')"
           @click.stop="settingsOpen = true"
         >
           <svg viewBox="0 0 20 20">
@@ -1220,7 +1237,7 @@ function closeSession(id: string) {
             />
             <circle cx="10" cy="10" r="2.6" />
           </svg>
-          <span>设置</span>
+          <span>{{ t("app.navSettings") }}</span>
         </button>
       </div>
     </aside>
@@ -1235,10 +1252,10 @@ function closeSession(id: string) {
         @click.self="settingsOpen = false"
         @keydown.esc="settingsOpen = false"
       >
-        <div class="settings-dialog" role="dialog" aria-modal="true" aria-label="设置">
+        <div class="settings-dialog" role="dialog" aria-modal="true" :aria-label="t('settings.title')">
           <header class="settings-head">
-            <strong>设置</strong>
-            <button class="settings-close" title="关闭" @click="settingsOpen = false">×</button>
+            <strong>{{ t("settings.title") }}</strong>
+            <button class="settings-close" :title="t('common.close')" @click="settingsOpen = false">×</button>
           </header>
 
           <div class="settings-main">
@@ -1252,7 +1269,7 @@ function closeSession(id: string) {
                   <path d="M8 2.4v7.4M5.2 6.9L8 9.7l2.8-2.8" />
                   <path d="M3.2 11.6v1.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1v-1.4" />
                 </svg>
-                <span>导入</span>
+                <span>{{ t("settings.import") }}</span>
               </button>
 
               <button
@@ -1264,7 +1281,7 @@ function closeSession(id: string) {
                   <path d="M8 10.8V3.4M5.2 6.2L8 3.4l2.8 2.8" />
                   <path d="M3.2 11.6v1.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1v-1.4" />
                 </svg>
-                <span>导出</span>
+                <span>{{ t("settings.export") }}</span>
               </button>
 
               <button
@@ -1278,53 +1295,63 @@ function closeSession(id: string) {
                     d="M10 2.6v1.8M10 15.6v1.8M2.6 10h1.8M15.6 10h1.8M4.8 4.8l1.3 1.3M13.9 13.9l1.3 1.3M15.2 4.8l-1.3 1.3M6.1 13.9l-1.3 1.3"
                   />
                 </svg>
-                <span>外观</span>
+                <span>{{ t("settings.appearance") }}</span>
                 <span class="nav-caret" :class="{ open: appearanceOpen }">›</span>
               </button>
 
               <div v-show="appearanceOpen" class="settings-subnav">
                 <button :class="{ on: settingsTab === 'theme' }" @click="settingsTab = 'theme'">
-                  主题
+                  {{ t("settings.theme") }}
                 </button>
                 <button :class="{ on: settingsTab === 'font' }" @click="settingsTab = 'font'">
-                  终端文字大小
+                  {{ t("settings.fontSize") }}
                 </button>
               </div>
+
+              <button
+                class="settings-nav-item"
+                :class="{ on: settingsTab === 'language' }"
+                @click="settingsTab = 'language'"
+              >
+                <svg viewBox="0 0 16 16">
+                  <circle cx="8" cy="8" r="5.6" />
+                  <path d="M2.4 8h11.2M8 2.4c2 2.2 2 9.2 0 11.2M8 2.4c-2 2.2-2 9.2 0 11.2" />
+                </svg>
+                <span>{{ t("settings.language") }}</span>
+              </button>
             </nav>
 
             <section class="settings-content">
               <template v-if="settingsTab === 'import'">
                 <div class="set-group">
-                  <span class="set-label">导入主机配置</span>
-                  <p class="set-desc">
-                    从 JSON 文件导入主机与登录凭据；若文件已加密，会提示输入导出时设置的密码。
-                  </p>
+                  <span class="set-label">{{ t("settings.importTitle") }}</span>
+                  <p class="set-desc">{{ t("settings.importDesc") }}</p>
                   <div class="set-btnrow">
-                    <button class="btn primary" @click="askImportHosts">导入主机</button>
+                    <button class="btn primary" @click="askImportHosts">
+                      {{ t("settings.importBtn") }}
+                    </button>
                   </div>
                 </div>
               </template>
 
               <template v-else-if="settingsTab === 'export'">
                 <div class="set-group">
-                  <span class="set-label">导出主机配置</span>
-                  <p class="set-desc">
-                    导出的 JSON 包含主机与登录凭据，请妥善保管；如需保护凭据，可选用下方的加密导出。
-                  </p>
+                  <span class="set-label">{{ t("settings.exportTitle") }}</span>
+                  <p class="set-desc">{{ t("settings.exportDesc") }}</p>
                   <div class="set-btnrow">
                     <button class="btn primary" :disabled="!hosts.length" @click="askExportHosts">
-                      导出主机
+                      {{ t("settings.exportBtn") }}
                     </button>
                   </div>
                   <button class="set-link" :disabled="!hosts.length" @click="askEncryptedExport">
-                    加密导出（可选）
+                    {{ t("settings.encryptedExport") }}
                   </button>
                 </div>
               </template>
 
               <template v-else-if="settingsTab === 'theme'">
                 <div class="set-group">
-                  <span class="set-label">主题</span>
+                  <span class="set-label">{{ t("settings.theme") }}</span>
                   <div class="set-seg">
                     <button
                       v-for="opt in themeOptions"
@@ -1338,10 +1365,10 @@ function closeSession(id: string) {
                 </div>
               </template>
 
-              <template v-else>
+              <template v-else-if="settingsTab === 'font'">
                 <div class="set-group">
                   <div class="set-row">
-                    <span class="set-label">终端文字大小</span>
+                    <span class="set-label">{{ t("settings.fontSize") }}</span>
                     <span class="set-value">{{ termFontSize }} px</span>
                   </div>
                   <input
@@ -1352,7 +1379,24 @@ function closeSession(id: string) {
                     :max="TERM_FONT_MAX"
                     step="1"
                   />
-                  <span class="set-hint">仅影响 SSH 终端中的字符大小</span>
+                  <span class="set-hint">{{ t("settings.fontHint") }}</span>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="set-group">
+                  <span class="set-label">{{ t("settings.language") }}</span>
+                  <p class="set-desc">{{ t("settings.languageDesc") }}</p>
+                  <div class="set-seg">
+                    <button
+                      v-for="opt in localeOptions"
+                      :key="opt.value"
+                      :class="{ on: locale === opt.value }"
+                      @click="changeLocale(opt.value)"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
                 </div>
               </template>
             </section>
@@ -1363,7 +1407,7 @@ function closeSession(id: string) {
             class="settings-actions"
           >
             <span />
-            <button class="btn" @click="resetAppearance">恢复默认</button>
+            <button class="btn" @click="resetAppearance">{{ t("settings.reset") }}</button>
           </footer>
         </div>
       </div>
@@ -1371,14 +1415,14 @@ function closeSession(id: string) {
 
     <!-- 第二行：搜索 + 新增（仅主页） -->
     <div v-if="page === 'home'" class="home-bar">
-      <input v-model="query" placeholder="搜索主机：IP、备注名或分组" />
-      <button class="btn primary new-btn" @click="openNew">新增主机</button>
+      <input v-model="query" :placeholder="t('home.searchPlaceholder')" />
+      <button class="btn primary new-btn" @click="openNew">{{ t("home.add") }}</button>
     </div>
 
     <!-- 第二行：代码块搜索 + 新增（仅代码块页） -->
     <div v-if="page === 'snippets'" class="home-bar">
-      <input v-model="snippetQuery" placeholder="搜索代码块：名称或代码内容" />
-      <button class="btn primary new-btn" @click="openNewSnippet">新增代码块</button>
+      <input v-model="snippetQuery" :placeholder="t('snippets.searchPlaceholder')" />
+      <button class="btn primary new-btn" @click="openNewSnippet">{{ t("snippets.add") }}</button>
     </div>
 
     <!-- 第三行：服务器列表 / 终端 / SFTP -->
@@ -1386,7 +1430,7 @@ function closeSession(id: string) {
       <section v-show="page === 'home'" class="list-view">
         <div class="list-head">
           <div class="lh-text">
-            <h2>主机</h2>
+            <h2>{{ t("home.title") }}</h2>
           </div>
         </div>
 
@@ -1394,7 +1438,7 @@ function closeSession(id: string) {
           <section v-for="g in homeSections" :key="g.name" class="group">
             <header class="group-head">
               <span class="group-name">{{ g.name }}</span>
-              <span class="group-count">{{ g.hosts.length }} 台服务器</span>
+              <span class="group-count">{{ t("home.hostCount", { n: g.hosts.length }) }}</span>
             </header>
 
             <div class="group-cards">
@@ -1417,7 +1461,7 @@ function closeSession(id: string) {
                   <div class="more">
                     <button
                       class="more-btn"
-                      title="更多操作"
+                      :title="t('home.moreActions')"
                       @click.stop="openHostMenuFromButton(h, $event)"
                     >
                       <svg viewBox="0 0 16 16">
@@ -1439,23 +1483,23 @@ function closeSession(id: string) {
         </div>
 
         <div v-if="!hosts.length" class="empty-state">
-          <h3>还没有保存主机连接</h3>
-          <p>点击「新增主机」添加第一条 SSH 连接信息，或从已有配置文件导入。</p>
+          <h3>{{ t("home.emptyTitle") }}</h3>
+          <p>{{ t("home.emptyDesc") }}</p>
           <div class="empty-actions">
-            <button class="btn primary" @click="openNew">新增主机</button>
-            <button class="btn" @click="askImportHosts">从文件导入</button>
+            <button class="btn primary" @click="openNew">{{ t("home.add") }}</button>
+            <button class="btn" @click="askImportHosts">{{ t("home.importFromFile") }}</button>
           </div>
         </div>
         <div v-else-if="!homeSections.length" class="empty-state">
-          <h3>没有匹配的服务器</h3>
-          <p>换个 IP 或备注名试试。</p>
+          <h3>{{ t("home.noMatchTitle") }}</h3>
+          <p>{{ t("home.noMatchDesc") }}</p>
         </div>
       </section>
 
       <section v-show="page === 'snippets'" class="list-view">
         <div class="list-head">
           <div class="lh-text">
-            <h2>代码块</h2>
+            <h2>{{ t("snippets.title") }}</h2>
           </div>
         </div>
 
@@ -1476,22 +1520,22 @@ function closeSession(id: string) {
               </span>
               <div class="who">
                 <strong>{{ s.name }}</strong>
-                <small>{{ snippetLines(s.code) }} 行 · {{ firstLine(s.code) }}</small>
+                <small>{{ t("snippets.lines", { n: snippetLines(s.code), first: firstLine(s.code) }) }}</small>
               </div>
 
               <div class="more snippet-actions">
-                <button class="more-btn" title="复制代码" @click.stop="copySnippet(s)">
+                <button class="more-btn" :title="t('snippets.copyCode')" @click.stop="copySnippet(s)">
                   <svg viewBox="0 0 16 16">
                     <rect x="5.6" y="5.6" width="8" height="8" rx="1.6" />
                     <path d="M10.4 3.2H4.2a1.6 1.6 0 0 0-1.6 1.6v6.2" />
                   </svg>
                 </button>
-                <button class="more-btn" title="编辑" @click.stop="openEditSnippet(s)">
+                <button class="more-btn" :title="t('common.edit')" @click.stop="openEditSnippet(s)">
                   <svg viewBox="0 0 16 16">
                     <path d="M11.3 2.7l2 2-7.4 7.4-2.7.7.7-2.7 7.4-7.4Z" />
                   </svg>
                 </button>
-                <button class="more-btn danger" title="删除" @click.stop="askDeleteSnippet(s)">
+                <button class="more-btn danger" :title="t('common.delete')" @click.stop="askDeleteSnippet(s)">
                   <svg viewBox="0 0 16 16">
                     <path
                       d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.5a1 1 0 0 0 1 .9h3.9a1 1 0 0 0 1-.9l.6-8.5"
@@ -1506,13 +1550,13 @@ function closeSession(id: string) {
         </div>
 
         <div v-if="!snippets.length" class="empty-state">
-          <h3>还没有代码块</h3>
-          <p>把常用的巡检、部署脚本保存下来，在 SSH 终端里可一键引入执行。</p>
-          <button class="btn primary" @click="openNewSnippet">新增代码块</button>
+          <h3>{{ t("snippets.emptyTitle") }}</h3>
+          <p>{{ t("snippets.emptyDesc") }}</p>
+          <button class="btn primary" @click="openNewSnippet">{{ t("snippets.add") }}</button>
         </div>
         <div v-else-if="!filteredSnippets.length" class="empty-state">
-          <h3>没有匹配的代码块</h3>
-          <p>换个名称或代码关键词试试。</p>
+          <h3>{{ t("snippets.noMatchTitle") }}</h3>
+          <p>{{ t("snippets.noMatchDesc") }}</p>
         </div>
       </section>
 
@@ -1524,13 +1568,13 @@ function closeSession(id: string) {
               <rect x="2" y="3" width="5" height="10" rx="1.2" />
               <rect x="9" y="3" width="5" height="10" rx="1.2" />
             </svg>
-            工作组
-            <span class="tt-count">{{ activeTab?.sessions.length }} 个终端</span>
+             {{ t("tabs.group") }}
+            <span class="tt-count">{{ t("tabs.moreTitle", { n: activeTab?.sessions.length }) }}</span>
           </span>
           <button
             class="tt-btn"
             :class="{ on: splitSync }"
-            :title="splitSync ? '输入会同步到同组其他终端' : '输入只发送到当前终端'"
+            :title="splitSync ? t('tabs.syncOn') : t('tabs.syncOff')"
             @click="splitSync = !splitSync"
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1538,22 +1582,22 @@ function closeSession(id: string) {
               <path d="M5.2 5.2L2.4 8l2.8 2.8" />
               <path d="M10.8 5.2L13.6 8l-2.8 2.8" />
             </svg>
-            同步输入
+            {{ t("tabs.syncInput") }}
           </button>
-          <button class="tt-btn" title="把合并的终端拆回独立标签" @click="splitActiveTab">
+          <button class="tt-btn" :title="t('tabs.splitTip')" @click="splitActiveTab">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 2.4v11.2" />
               <path d="M4 3l-2.4 2.4L4 7.8" />
               <path d="M12 3l2.4 2.4L12 7.8" />
             </svg>
-            拆分窗口
+            {{ t("tabs.split") }}
           </button>
-          <span class="tt-hint">拖动终端标题可拖回顶部标签栏</span>
+          <span class="tt-hint">{{ t("tabs.dragHint") }}</span>
         </div>
         <div ref="terminalsEl" class="terminals" :class="{ merged: mergedLayout }">
           <!-- 落点预览：只覆盖目标面板将要分出去的那一半 -->
           <div v-if="splitPreview" class="split-preview" :style="previewStyle">
-            <span>{{ splitPreview.direction === "row" ? "左右分屏" : "上下分屏" }}</span>
+            <span>{{ splitPreview.direction === "row" ? t("tabs.splitRow") : t("tabs.splitColumn") }}</span>
           </div>
           <div
             v-for="s in sessions"
@@ -1611,16 +1655,15 @@ function closeSession(id: string) {
               </svg>
             </span>
             <div class="confirm-text">
-              <h3>删除连接</h3>
+              <h3>{{ t("confirm.deleteHostTitle") }}</h3>
               <p>
-                确定要删除「<strong>{{ pendingDelete.name || pendingDelete.host }}</strong
-                >」吗？
+                {{ t("confirm.deleteHostDesc", { name: pendingDelete.name || pendingDelete.host }) }}
               </p>
             </div>
           </div>
           <div class="confirm-actions">
-            <button class="btn" @click="pendingDelete = null">取消</button>
-            <button class="btn danger" @click="confirmDelete">删除</button>
+            <button class="btn" @click="pendingDelete = null">{{ t("common.cancel") }}</button>
+            <button class="btn danger" @click="confirmDelete">{{ t("common.delete") }}</button>
           </div>
         </div>
       </div>
@@ -1646,16 +1689,13 @@ function closeSession(id: string) {
               </svg>
             </span>
             <div class="confirm-text">
-              <h3>删除代码块</h3>
-              <p>
-                确定要删除「<strong>{{ pendingSnippet.name }}</strong
-                >」吗？
-              </p>
+              <h3>{{ t("confirm.deleteSnippetTitle") }}</h3>
+              <p>{{ t("confirm.deleteSnippetDesc", { name: pendingSnippet.name }) }}</p>
             </div>
           </div>
           <div class="confirm-actions">
-            <button class="btn" @click="pendingSnippet = null">取消</button>
-            <button class="btn danger" @click="confirmDeleteSnippet">删除</button>
+            <button class="btn" @click="pendingSnippet = null">{{ t("common.cancel") }}</button>
+            <button class="btn danger" @click="confirmDeleteSnippet">{{ t("common.delete") }}</button>
           </div>
         </div>
       </div>
@@ -1679,38 +1719,36 @@ function closeSession(id: string) {
               </svg>
             </span>
             <div class="confirm-text">
-              <h3>{{ transferMode === "export" ? "加密导出" : "输入文件密码" }}</h3>
-              <p v-if="transferMode === 'export'">
-                设置一个密码，文件中的登录凭据会用它加密，导入时需要输入同一密码。
-              </p>
-              <p v-else>该文件已加密，请输入导出时设置的密码。</p>
+              <h3>{{ transferMode === "export" ? t("transfer.exportTitle") : t("transfer.importTitle") }}</h3>
+              <p v-if="transferMode === 'export'">{{ t("transfer.exportDesc") }}</p>
+              <p v-else>{{ t("transfer.importDesc") }}</p>
             </div>
           </div>
           <div class="pwd-fields">
             <label>
-              <span>{{ transferMode === "export" ? "加密密码" : "文件密码" }}</span>
+              <span>{{ transferMode === "export" ? t("transfer.password") : t("transfer.filePassword") }}</span>
               <input
                 v-model="transferPassword"
                 type="password"
-                :placeholder="transferMode === 'export' ? '设置一个密码' : '输入文件密码'"
+                :placeholder="transferMode === 'export' ? t('transfer.passwordPlaceholder') : t('transfer.filePasswordPlaceholder')"
                 @keydown.enter="submitTransfer"
               />
             </label>
             <label v-if="transferMode === 'export'">
-              <span>确认密码</span>
+              <span>{{ t("transfer.confirm") }}</span>
               <input
                 v-model="transferConfirm"
                 type="password"
-                placeholder="再次输入密码"
+                :placeholder="t('transfer.confirmPlaceholder')"
                 @keydown.enter="submitTransfer"
               />
             </label>
             <p v-if="transferError" class="pwd-error">{{ transferError }}</p>
           </div>
           <div class="confirm-actions">
-            <button class="btn" @click="closeTransfer">取消</button>
+            <button class="btn" @click="closeTransfer">{{ t("common.cancel") }}</button>
             <button class="btn primary" @click="submitTransfer">
-              {{ transferMode === "export" ? "导出" : "导入" }}
+              {{ transferMode === "export" ? t("settings.export") : t("settings.import") }}
             </button>
           </div>
         </div>
@@ -1734,27 +1772,27 @@ function closeSession(id: string) {
           <svg viewBox="0 0 16 16">
             <path d="M5.5 2v3.2M10.5 2v3.2M3.6 5.2h8.8v1.9a4.4 4.4 0 0 1-8.8 0V5.2ZM8 11.5V14" />
           </svg>
-          连接
+          {{ t("common.connect") }}
         </button>
         <button class="host-menu-item" @click="runHostAction('edit')">
           <svg viewBox="0 0 16 16">
             <path d="M11.3 2.7l2 2-7.4 7.4-2.7.7.7-2.7 7.4-7.4Z" />
           </svg>
-          编辑
+          {{ t("common.edit") }}
         </button>
         <button class="host-menu-item" @click="runHostAction('duplicate')">
           <svg viewBox="0 0 16 16">
             <rect x="5.6" y="5.6" width="8" height="8" rx="1.6" />
             <path d="M10.4 3.2H4.2a1.6 1.6 0 0 0-1.6 1.6v6.2" />
           </svg>
-          复制
+          {{ t("common.duplicate") }}
         </button>
         <div class="host-menu-sep" />
         <button class="host-menu-item danger" @click="runHostAction('delete')">
           <svg viewBox="0 0 16 16">
             <path d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.5a1 1 0 0 0 1 .9h3.9a1 1 0 0 0 1-.9l.6-8.5" />
           </svg>
-          删除
+          {{ t("common.delete") }}
         </button>
       </div>
     </Teleport>

@@ -2,6 +2,7 @@
 // 所有 Wails 事件只在这里订阅一次，再分发给各终端与面板组件。
 import { computed, reactive, ref } from "vue";
 import { Events } from "@wailsio/runtime";
+import { t } from "./i18n";
 import * as SSH from "../bindings/shuttle/sshservice";
 import {
   SshClosed,
@@ -284,7 +285,7 @@ export function startEventBridge() {
       return;
     }
     s.status = "closed";
-    s.message = payload.reason || "连接已断开";
+    s.message = payload.reason || t("session.closedMessage");
     selectedIds.delete(payload.sessionId);
   });
 
@@ -325,7 +326,7 @@ export async function loadHosts() {
       ...blankHost(),
       ...h,
       id: h.id || newSessionId(),
-      group: h.group || "默认分组",
+      group: h.group || t("group.default"),
       port: h.port || 22,
       authMethod: h.authMethod || "password",
       encoding: h.encoding || "UTF-8",
@@ -335,7 +336,7 @@ export async function loadHosts() {
       timeoutSec: h.timeoutSec || 15,
     }));
   } catch (e) {
-    console.error("读取连接档案失败", e);
+    console.error("Failed to load host profiles", e);
   }
 }
 
@@ -349,7 +350,7 @@ export function blankHost(): HostConfig {
     id: newSessionId(),
     sessionId: "",
     name: "",
-    group: "默认分组",
+    group: t("group.default"),
     host: "",
     port: 22,
     user: "root",
@@ -369,23 +370,13 @@ export function blankHost(): HostConfig {
 
 /** 同一服务器重复打开时，依次命名为「副本1」「副本2」… 避免标签重名。 */
 function nextSessionName(base: string): string {
-  const prefix = `${base} 副本`;
-  let max = 0;
-  let seen = false;
-  for (const s of sessions.value) {
-    const label = sessionLabel(s);
-    if (label === base) {
-      seen = true;
-      continue;
-    }
-    if (!label.startsWith(prefix)) continue;
-    const n = Number.parseInt(label.slice(prefix.length), 10);
-    if (Number.isFinite(n)) {
-      seen = true;
-      if (n > max) max = n;
-    }
+  const labels = new Set(sessions.value.map((s) => sessionLabel(s)));
+  if (!labels.has(base)) return base;
+  for (let n = 1; n < 1000; n++) {
+    const candidate = t("session.copyN", { base, n });
+    if (!labels.has(candidate)) return candidate;
   }
-  return seen ? `${prefix}${max + 1}` : base;
+  return base;
 }
 
 export async function connect(cfg: HostConfig) {
@@ -399,7 +390,7 @@ export async function connect(cfg: HostConfig) {
     user: cfg.user,
     encoding: cfg.encoding,
     status: "connecting",
-    message: "正在连接…",
+    message: t("session.connectingMessage"),
     cols: cfg.cols || 120,
     rows: cfg.rows || 32,
     connectedAt: 0,
@@ -425,7 +416,7 @@ export async function reconnect(id: string) {
   if (!s || !cfg) return;
 
   s.status = "connecting";
-  s.message = "正在连接…";
+  s.message = t("session.connectingMessage");
   s.connectedAt = 0;
 
   // 后端可能仍保留旧会话（如远端断开），先清理再重连，避免 id 冲突。
@@ -474,7 +465,7 @@ export function removeSession(id: string) {
 /** 发送按键。分屏同步时只广播到同组会话，全局同步时广播到全部连接。 */
 export function sendKeys(id: string, data: string) {
   if (syncInput.value) {
-    SSH.Write([], data).catch((e) => console.error("发送失败", e));
+    SSH.Write([], data).catch((e) => console.error("Failed to send input", e));
     return;
   }
   const group = splitGroupOf(id);
@@ -484,18 +475,18 @@ export function sendKeys(id: string, data: string) {
       return s ? isConnected(s) : false;
     });
     SSH.Write(ids.length ? ids : [id], data).catch((e) =>
-      console.error("发送失败", e),
+      console.error("Failed to send input", e),
     );
     return;
   }
-  SSH.Write([id], data).catch((e) => console.error("发送失败", e));
+  SSH.Write([id], data).catch((e) => console.error("Failed to send input", e));
 }
 
 /** 广播一条命令到所选会话。 */
 export async function runBroadcast(command: string) {
   const ids = broadcastTargets();
   if (!ids.length) {
-    throw new Error("请先勾选至少一台已连接的会话");
+    throw new Error(t("session.needSelection"));
   }
   await SSH.Exec(ids, command);
 }

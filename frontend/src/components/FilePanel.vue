@@ -1,11 +1,14 @@
 <script setup lang="ts">
 // SFTP 文件面板：浏览远端目录、上传、下载、新建、删除、重命名。
 import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { RemoteFile } from "../../bindings/shuttle/internal/sshcore/models";
 import { isConnected, sessionById, transfers } from "../store";
 
 const props = defineProps<{ sessionId: string }>();
+
+const { t } = useI18n();
 
 const cwd = ref("");
 const pathInput = ref("");
@@ -17,7 +20,7 @@ const notice = ref("");
 
 const session = computed(() => sessionById(props.sessionId));
 const ready = computed(() => !!session.value && isConnected(session.value));
-const busyText = computed(() => (busy.value ? "处理中…" : ""));
+const busyText = computed(() => (busy.value ? t("files.busy") : ""));
 
 const sessionTransfers = computed(() =>
   transfers.value.filter((t) => t.sessionId === props.sessionId).slice(0, 6),
@@ -68,7 +71,7 @@ async function run<T>(label: string, fn: () => Promise<T>): Promise<T | undefine
   try {
     return await fn();
   } catch (e) {
-    error.value = `${label}失败：${String(e)}`;
+    error.value = t("files.failed", { label, error: String(e) });
     return undefined;
   } finally {
     busy.value = false;
@@ -77,7 +80,7 @@ async function run<T>(label: string, fn: () => Promise<T>): Promise<T | undefine
 
 async function open(dir: string) {
   if (!props.sessionId) return;
-  await run("读取目录", async () => {
+  await run(t("files.labelReadDir"), async () => {
     const list = (await SSH.ListRemote(props.sessionId, dir)) ?? [];
     list.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
@@ -91,7 +94,7 @@ async function open(dir: string) {
 }
 
 async function goHome() {
-  const home = await run("获取家目录", () => SSH.RemoteHome(props.sessionId));
+  const home = await run(t("files.labelHome"), () => SSH.RemoteHome(props.sessionId));
   if (home) await open(home);
 }
 
@@ -119,11 +122,15 @@ function pickedEntries(): RemoteFile[] {
 
 async function upload() {
   if (!cwd.value) return;
-  const paths = await run("选择文件", () => SSH.PickFiles("选择要上传的文件"));
+  const paths = await run(t("files.labelPickFiles"), () =>
+    SSH.PickFiles(t("files.pickUploadTitle")),
+  );
   if (!paths || !paths.length) return;
-  const ok = await run("上传", () => SSH.Upload(props.sessionId, cwd.value, paths));
+  const ok = await run(t("files.labelUpload"), () =>
+    SSH.Upload(props.sessionId, cwd.value, paths),
+  );
   if (ok !== undefined) {
-    notice.value = `已上传 ${paths.length} 个文件到 ${cwd.value}`;
+    notice.value = t("files.uploadedMsg", { n: paths.length, dir: cwd.value });
     await refresh();
   }
 }
@@ -131,29 +138,31 @@ async function upload() {
 async function download() {
   const targets = pickedEntries();
   if (!targets.length) {
-    error.value = "请先勾选要下载的文件";
+    error.value = t("files.needDownloadSelect");
     return;
   }
-  const dir = await run("选择保存目录", () => SSH.PickDirectory("选择本地保存目录"));
+  const dir = await run(t("files.labelPickDir"), () =>
+    SSH.PickDirectory(t("files.pickDirTitle")),
+  );
   if (!dir) return;
-  const ok = await run("下载", () =>
+  const ok = await run(t("files.labelDownload"), () =>
     SSH.Download(
       props.sessionId,
-      targets.map((t) => t.path),
+      targets.map((item) => item.path),
       dir,
     ),
   );
-  if (ok !== undefined) notice.value = `已下载 ${targets.length} 个文件到 ${dir}`;
+  if (ok !== undefined) notice.value = t("files.downloadedMsg", { n: targets.length, dir });
 }
 
 async function mkdir() {
-  const name = window.prompt("新建文件夹名称");
+  const name = window.prompt(t("files.newFolderPrompt"));
   if (!name) return;
-  const ok = await run("新建文件夹", () =>
+  const ok = await run(t("files.labelMkdir"), () =>
     SSH.Mkdir(props.sessionId, joinRemote(cwd.value, name)),
   );
   if (ok !== undefined) {
-    notice.value = `已创建 ${name}`;
+    notice.value = t("files.created", { name });
     await refresh();
   }
 }
@@ -161,17 +170,17 @@ async function mkdir() {
 async function remove() {
   const targets = pickedEntries();
   if (!targets.length) {
-    error.value = "请先勾选要删除的条目";
+    error.value = t("files.needDeleteSelect");
     return;
   }
-  if (!window.confirm(`确认删除选中的 ${targets.length} 个条目？目录将递归删除。`)) return;
-  const ok = await run("删除", async () => {
-    for (const t of targets) {
-      await SSH.Remove(props.sessionId, t.path, t.isDir);
+  if (!window.confirm(t("files.confirmDelete", { n: targets.length }))) return;
+  const ok = await run(t("files.labelRemove"), async () => {
+    for (const item of targets) {
+      await SSH.Remove(props.sessionId, item.path, item.isDir);
     }
   });
   if (ok !== undefined) {
-    notice.value = "删除完成";
+    notice.value = t("files.deleted");
     await refresh();
   }
 }
@@ -179,17 +188,17 @@ async function remove() {
 async function rename() {
   const targets = pickedEntries();
   if (targets.length !== 1) {
-    error.value = "请只勾选一个条目再重命名";
+    error.value = t("files.needOneRename");
     return;
   }
   const target = targets[0];
-  const name = window.prompt("新名称", target.name);
+  const name = window.prompt(t("files.renamePrompt"), target.name);
   if (!name || name === target.name) return;
-  const ok = await run("重命名", () =>
+  const ok = await run(t("files.labelRename"), () =>
     SSH.Rename(props.sessionId, target.path, joinRemote(cwd.value, name)),
   );
   if (ok !== undefined) {
-    notice.value = "重命名完成";
+    notice.value = t("files.renamed");
     await refresh();
   }
 }
@@ -223,16 +232,31 @@ watch(ready, (v) => {
 <template>
   <div class="files">
     <div class="bar">
-      <button class="btn icon" :disabled="!ready || busy" title="返回上级目录" @click="goParent">
+      <button
+        class="btn icon"
+        :disabled="!ready || busy"
+        :title="t('browser.parent')"
+        @click="goParent"
+      >
         <svg viewBox="0 0 16 16"><path d="M13 8H3.5M7.5 4L3.5 8l4 4" /></svg>
       </button>
-      <button class="btn icon" :disabled="!ready || busy" title="回到家目录" @click="goHome">
+      <button
+        class="btn icon"
+        :disabled="!ready || busy"
+        :title="t('browser.home')"
+        @click="goHome"
+      >
         <svg viewBox="0 0 16 16">
           <path d="M2.5 7.2L8 3l5.5 4.2v5.6a.7.7 0 0 1-.7.7H3.2a.7.7 0 0 1-.7-.7z" />
           <path d="M6.4 13.5V9.8h3.2v3.7" />
         </svg>
       </button>
-      <button class="btn icon" :disabled="!ready || busy" title="刷新" @click="refresh">
+      <button
+        class="btn icon"
+        :disabled="!ready || busy"
+        :title="t('browser.refresh')"
+        @click="refresh"
+      >
         <svg viewBox="0 0 16 16">
           <path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8" />
           <path d="M13.4 2.6v3h-3" />
@@ -245,28 +269,34 @@ watch(ready, (v) => {
         placeholder="/home/user"
         @keyup.enter="open(pathInput)"
       />
-      <button class="btn primary" :disabled="!ready || busy" @click="upload">上传</button>
-      <button class="btn" :disabled="!ready || busy" @click="download">下载</button>
-      <button class="btn" :disabled="!ready || busy" @click="mkdir">新建目录</button>
+      <button class="btn primary" :disabled="!ready || busy" @click="upload">
+        {{ t("common.upload") }}
+      </button>
+      <button class="btn" :disabled="!ready || busy" @click="download">
+        {{ t("common.download") }}
+      </button>
+      <button class="btn" :disabled="!ready || busy" @click="mkdir">
+        {{ t("common.newFolder") }}
+      </button>
       <button class="btn" :disabled="!ready || busy || picked.length !== 1" @click="rename">
-        重命名
+        {{ t("common.rename") }}
       </button>
       <button class="btn danger" :disabled="!ready || busy || !picked.length" @click="remove">
-        删除
+        {{ t("common.delete") }}
       </button>
     </div>
 
-    <p v-if="!ready" class="hint">会话未连接，无法浏览文件。</p>
+    <p v-if="!ready" class="hint">{{ t("browser.notConnected") }}</p>
     <p v-else-if="error" class="error">{{ error }}</p>
     <p v-else-if="notice" class="notice">{{ notice }}</p>
 
     <div class="list">
       <div class="row head">
         <span class="c-check" />
-        <span class="c-name">名称</span>
-        <span class="c-size">大小</span>
-        <span class="c-mode">权限</span>
-        <span class="c-time">修改时间</span>
+        <span class="c-name">{{ t("common.name") }}</span>
+        <span class="c-size">{{ t("common.size") }}</span>
+        <span class="c-mode">{{ t("common.permissions") }}</span>
+        <span class="c-time">{{ t("common.modified") }}</span>
       </div>
       <div
         v-for="entry in entries"
@@ -296,32 +326,44 @@ watch(ready, (v) => {
         <span class="c-mode">{{ entry.mode }}</span>
         <span class="c-time">{{ stamp(entry.modTime) }}</span>
       </div>
-      <p v-if="ready && !entries.length && !busy" class="empty">目录为空</p>
+      <p v-if="ready && !entries.length && !busy" class="empty">{{ t("common.emptyDir") }}</p>
       <p v-if="busy" class="empty">{{ busyText }}</p>
     </div>
 
     <div v-if="sessionTransfers.length" class="progress">
-      <div v-for="t in sessionTransfers" :key="t.sessionId + t.name + t.transferred" class="task">
+      <div
+        v-for="task in sessionTransfers"
+        :key="task.sessionId + task.name + task.transferred"
+        class="task"
+      >
         <span class="tname">
-          <svg v-if="t.direction === 'upload'" class="tico" viewBox="0 0 16 16">
+          <svg v-if="task.direction === 'upload'" class="tico" viewBox="0 0 16 16">
             <path d="M8 13.2V3.6M4.2 7.4L8 3.6l3.8 3.8" />
           </svg>
           <svg v-else class="tico" viewBox="0 0 16 16">
             <path d="M8 2.8v9.6M4.2 8.6L8 12.4l3.8-3.8" />
           </svg>
-          <span class="tnm">{{ t.name }}</span>
+          <span class="tnm">{{ task.name }}</span>
         </span>
         <div class="track">
           <div
             class="fill"
-            :class="{ fail: !!t.error }"
+            :class="{ fail: !!task.error }"
             :style="{
-              width: t.total ? Math.min(100, (t.transferred / t.total) * 100) + '%' : '100%',
+              width: task.total
+                ? Math.min(100, (task.transferred / task.total) * 100) + '%'
+                : '100%',
             }"
           />
         </div>
         <span class="tstate">
-          {{ t.error ? "失败" : t.done ? "完成" : `${human(t.transferred)} / ${human(t.total)}` }}
+          {{
+            task.error
+              ? t("common.failed")
+              : task.done
+                ? t("common.done")
+                : `${human(task.transferred)} / ${human(task.total)}`
+          }}
         </span>
       </div>
     </div>

@@ -9,5 +9,5 @@ import "fmt"
 const legacyDPAPIPrefix = "dpapi:v1:"
 
 func decryptLegacyDPAPI(string) (string, error) {
-	return "", fmt.Errorf("旧版 DPAPI 密文只能在原 Windows 账户下解密")
+	return "", fmt.Errorf("legacy DPAPI ciphertext can only be decrypted by the original Windows account")
 }

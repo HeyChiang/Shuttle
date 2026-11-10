@@ -44,10 +44,10 @@ func NewSftpManager(emit Emitter) *SftpManager {
 func (m *SftpManager) Connect(cfg HostConfig, token string) error {
 	cfg = applyDefaults(cfg)
 	if strings.TrimSpace(cfg.Host) == "" {
-		return fmt.Errorf("请填写主机地址")
+		return fmt.Errorf("host address is required")
 	}
 	if strings.TrimSpace(token) == "" {
-		return fmt.Errorf("缺少连接标识")
+		return fmt.Errorf("missing connection token")
 	}
 
 	m.Close(token)
@@ -59,7 +59,7 @@ func (m *SftpManager) Connect(cfg HostConfig, token string) error {
 	sc, err := sftp.NewClient(client)
 	if err != nil {
 		_ = client.Close()
-		return fmt.Errorf("打开 SFTP 失败: %w", err)
+		return fmt.Errorf("failed to open SFTP: %w", err)
 	}
 	home, err := sc.Getwd()
 	if err != nil || home == "" {
@@ -117,7 +117,7 @@ func (m *SftpManager) get(token string) (*sftpConn, error) {
 	defer m.mu.Unlock()
 	conn, ok := m.conns[token]
 	if !ok {
-		return nil, fmt.Errorf("SFTP 连接不存在或已关闭")
+		return nil, fmt.Errorf("SFTP connection does not exist or is closed")
 	}
 	return conn, nil
 }
@@ -163,7 +163,7 @@ func (m *SftpManager) Mkdir(token, dir string) error {
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 	if err := conn.sftp.Mkdir(conn.resolve(dir)); err != nil {
-		return fmt.Errorf("创建目录失败: %w", err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 	return nil
 }
@@ -194,20 +194,20 @@ func (m *SftpManager) Upload(token, remoteDir string, localPaths []string) error
 
 	absDir := conn.resolve(remoteDir)
 	if err := conn.sftp.MkdirAll(absDir); err != nil {
-		return fmt.Errorf("创建远程目录失败: %w", err)
+		return fmt.Errorf("failed to create remote directory: %w", err)
 	}
 	var firstErr error
 	for _, localPath := range localPaths {
 		stat, err := os.Stat(localPath)
 		if err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("读取本地文件失败: %w", err)
+				firstErr = fmt.Errorf("failed to read local file: %w", err)
 			}
 			continue
 		}
 		if stat.IsDir() {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("%s 是目录，暂不支持目录上传", filepath.Base(localPath))
+				firstErr = fmt.Errorf("%s is a directory; directory upload is not supported", filepath.Base(localPath))
 			}
 			continue
 		}
@@ -215,7 +215,7 @@ func (m *SftpManager) Upload(token, remoteDir string, localPaths []string) error
 		err = sendLocalFile(conn.sftp, localPath, absDir, progress)
 		progress.finish(err)
 		if err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("上传 %s 失败: %w", filepath.Base(localPath), err)
+			firstErr = fmt.Errorf("failed to upload %s: %w", filepath.Base(localPath), err)
 		}
 	}
 	return firstErr
@@ -236,13 +236,13 @@ func (m *SftpManager) Download(token string, remotePaths []string, localDir stri
 		stat, err := conn.sftp.Stat(abs)
 		if err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("读取远程文件失败: %w", err)
+				firstErr = fmt.Errorf("failed to read remote file: %w", err)
 			}
 			continue
 		}
 		if stat.IsDir() {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("%s 是目录，暂不支持目录下载", path.Base(abs))
+				firstErr = fmt.Errorf("%s is a directory; directory download is not supported", path.Base(abs))
 			}
 			continue
 		}
@@ -250,7 +250,7 @@ func (m *SftpManager) Download(token string, remotePaths []string, localDir stri
 		err = receiveRemoteFile(conn.sftp, abs, localDir, progress)
 		progress.finish(err)
 		if err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("下载 %s 失败: %w", path.Base(abs), err)
+			firstErr = fmt.Errorf("failed to download %s: %w", path.Base(abs), err)
 		}
 	}
 	return firstErr
@@ -267,7 +267,7 @@ func (m *SftpManager) Transfer(srcToken, dstToken string, remotePaths []string, 
 		return err
 	}
 	if src == dst {
-		return fmt.Errorf("源主机与目标主机相同")
+		return fmt.Errorf("source and destination hosts are the same")
 	}
 
 	// Lock in a stable order so two opposite transfers cannot deadlock.
@@ -282,7 +282,7 @@ func (m *SftpManager) Transfer(srcToken, dstToken string, remotePaths []string, 
 
 	absDstDir := dst.resolve(dstDir)
 	if err := dst.sftp.MkdirAll(absDstDir); err != nil {
-		return fmt.Errorf("创建目标目录失败: %w", err)
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	var firstErr error
@@ -291,13 +291,13 @@ func (m *SftpManager) Transfer(srcToken, dstToken string, remotePaths []string, 
 		stat, err := src.sftp.Stat(abs)
 		if err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("读取源文件失败: %w", err)
+				firstErr = fmt.Errorf("failed to read source file: %w", err)
 			}
 			continue
 		}
 		if stat.IsDir() {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("%s 是目录，暂不支持目录传输", path.Base(abs))
+				firstErr = fmt.Errorf("%s is a directory; directory transfer is not supported", path.Base(abs))
 			}
 			continue
 		}
@@ -305,7 +305,7 @@ func (m *SftpManager) Transfer(srcToken, dstToken string, remotePaths []string, 
 		err = copyRemoteToRemote(src.sftp, dst.sftp, abs, path.Join(absDstDir, path.Base(abs)), progress)
 		progress.finish(err)
 		if err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("传输 %s 失败: %w", path.Base(abs), err)
+			firstErr = fmt.Errorf("failed to transfer %s: %w", path.Base(abs), err)
 		}
 	}
 	return firstErr

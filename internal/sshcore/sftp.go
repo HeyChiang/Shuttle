@@ -28,7 +28,7 @@ func (s *session) listRemote(dir string) ([]RemoteFile, error) {
 func listRemoteDir(c *sftp.Client, abs string) ([]RemoteFile, error) {
 	entries, err := c.ReadDir(abs)
 	if err != nil {
-		return nil, fmt.Errorf("读取目录 %s 失败: %w", abs, err)
+		return nil, fmt.Errorf("failed to read directory %s: %w", abs, err)
 	}
 	out := make([]RemoteFile, 0, len(entries))
 	for _, entry := range entries {
@@ -67,7 +67,7 @@ func (s *session) mkdir(p string) error {
 		return err
 	}
 	if err := c.Mkdir(abs); err != nil {
-		return fmt.Errorf("创建目录失败: %w", err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 	return nil
 }
@@ -152,13 +152,13 @@ func (p *transferProgress) finish(err error) {
 func sendLocalFile(c *sftp.Client, localPath, absDir string, progress *transferProgress) error {
 	local, err := os.Open(localPath)
 	if err != nil {
-		return fmt.Errorf("打开本地文件失败: %w", err)
+		return fmt.Errorf("failed to open local file: %w", err)
 	}
 	defer func() { _ = local.Close() }()
 
 	remote, err := c.OpenFile(path.Join(absDir, filepath.Base(localPath)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
 	if err != nil {
-		return fmt.Errorf("创建远程文件失败: %w", err)
+		return fmt.Errorf("failed to create remote file: %w", err)
 	}
 	_, err = io.Copy(io.MultiWriter(remote, progressWriter{progress}), local)
 	closeErr := remote.Close()
@@ -172,16 +172,16 @@ func sendLocalFile(c *sftp.Client, localPath, absDir string, progress *transferP
 func receiveRemoteFile(c *sftp.Client, abs, localDir string, progress *transferProgress) error {
 	remote, err := c.Open(abs)
 	if err != nil {
-		return fmt.Errorf("打开远程文件失败: %w", err)
+		return fmt.Errorf("failed to open remote file: %w", err)
 	}
 	defer func() { _ = remote.Close() }()
 
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
-		return fmt.Errorf("创建本地目录失败: %w", err)
+		return fmt.Errorf("failed to create local directory: %w", err)
 	}
 	local, err := os.Create(filepath.Join(localDir, path.Base(abs)))
 	if err != nil {
-		return fmt.Errorf("创建本地文件失败: %w", err)
+		return fmt.Errorf("failed to create local file: %w", err)
 	}
 	_, err = io.Copy(io.MultiWriter(local, progressWriter{progress}), remote)
 	closeErr := local.Close()
@@ -196,13 +196,13 @@ func receiveRemoteFile(c *sftp.Client, abs, localDir string, progress *transferP
 func copyRemoteToRemote(src, dst *sftp.Client, srcPath, dstPath string, progress *transferProgress) error {
 	in, err := src.Open(srcPath)
 	if err != nil {
-		return fmt.Errorf("打开源文件失败: %w", err)
+		return fmt.Errorf("failed to open source file: %w", err)
 	}
 	defer func() { _ = in.Close() }()
 
 	out, err := dst.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
 	if err != nil {
-		return fmt.Errorf("创建目标文件失败: %w", err)
+		return fmt.Errorf("failed to create destination file: %w", err)
 	}
 	_, err = io.Copy(io.MultiWriter(out, progressWriter{progress}), in)
 	closeErr := out.Close()
@@ -224,17 +224,17 @@ func (s *session) upload(localPath, remoteDir string) error {
 	}
 	stat, err := os.Stat(localPath)
 	if err != nil {
-		return fmt.Errorf("读取本地文件失败: %w", err)
+		return fmt.Errorf("failed to read local file: %w", err)
 	}
 	if stat.IsDir() {
-		return fmt.Errorf("%s 是目录，暂不支持目录上传", filepath.Base(localPath))
+		return fmt.Errorf("%s is a directory; directory upload is not supported", filepath.Base(localPath))
 	}
 
 	progress := newProgress(s.emit, s.cfg.SessionID, filepath.Base(localPath), "upload", stat.Size())
 	err = sendLocalFile(c, localPath, absDir, progress)
 	progress.finish(err)
 	if err != nil {
-		return fmt.Errorf("上传 %s 失败: %w", progress.name, err)
+		return fmt.Errorf("failed to upload %s: %w", progress.name, err)
 	}
 	return nil
 }
@@ -251,17 +251,17 @@ func (s *session) download(remotePath, localDir string) error {
 	}
 	stat, err := c.Stat(abs)
 	if err != nil {
-		return fmt.Errorf("读取远程文件失败: %w", err)
+		return fmt.Errorf("failed to read remote file: %w", err)
 	}
 	if stat.IsDir() {
-		return fmt.Errorf("%s 是目录，暂不支持目录下载", path.Base(abs))
+		return fmt.Errorf("%s is a directory; directory download is not supported", path.Base(abs))
 	}
 
 	progress := newProgress(s.emit, s.cfg.SessionID, path.Base(abs), "download", stat.Size())
 	err = receiveRemoteFile(c, abs, localDir, progress)
 	progress.finish(err)
 	if err != nil {
-		return fmt.Errorf("下载 %s 失败: %w", progress.name, err)
+		return fmt.Errorf("failed to download %s: %w", progress.name, err)
 	}
 	return nil
 }
@@ -279,10 +279,10 @@ func (w progressWriter) Write(b []byte) (int, error) {
 func (m *Manager) sessionOrErr(id string) (*session, error) {
 	s := m.get(id)
 	if s == nil {
-		return nil, fmt.Errorf("会话不存在")
+		return nil, fmt.Errorf("session does not exist")
 	}
 	if s.isClosed() {
-		return nil, fmt.Errorf("会话已关闭")
+		return nil, fmt.Errorf("session is closed")
 	}
 	return s, nil
 }

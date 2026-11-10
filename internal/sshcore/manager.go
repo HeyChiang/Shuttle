@@ -42,7 +42,7 @@ func (m *Manager) get(id string) *session {
 func (m *Manager) Connect(cfg HostConfig) (SessionInfo, error) {
 	cfg = applyDefaults(cfg)
 	if strings.TrimSpace(cfg.Host) == "" {
-		return SessionInfo{}, fmt.Errorf("请填写主机地址")
+		return SessionInfo{}, fmt.Errorf("host address is required")
 	}
 	if cfg.SessionID == "" {
 		cfg.SessionID = fmt.Sprintf("%s@%s:%d-%d", cfg.User, cfg.Host, cfg.Port, time.Now().UnixNano())
@@ -51,13 +51,13 @@ func (m *Manager) Connect(cfg HostConfig) (SessionInfo, error) {
 	m.mu.Lock()
 	if _, exists := m.sessions[cfg.SessionID]; exists {
 		m.mu.Unlock()
-		return SessionInfo{}, fmt.Errorf("会话 %s 已存在", cfg.SessionID)
+		return SessionInfo{}, fmt.Errorf("session %s already exists", cfg.SessionID)
 	}
 	s := newSession(cfg, m.emit)
 	m.sessions[cfg.SessionID] = s
 	m.mu.Unlock()
 
-	m.emit(EventStatus, StatusEvent{SessionID: cfg.SessionID, Status: StatusConnecting, Message: "正在连接 " + cfg.Host})
+	m.emit(EventStatus, StatusEvent{SessionID: cfg.SessionID, Status: StatusConnecting, Message: "Connecting to " + cfg.Host})
 	if err := s.start(); err != nil {
 		s.close()
 		m.mu.Lock()
@@ -118,7 +118,7 @@ func (m *Manager) Count() int {
 func (m *Manager) Write(ids []string, data string) error {
 	targets := m.resolve(ids)
 	if len(targets) == 0 {
-		return fmt.Errorf("没有可用的会话")
+		return fmt.Errorf("no available sessions")
 	}
 	var firstErr error
 	for _, s := range targets {
@@ -178,7 +178,7 @@ func (m *Manager) execOne(s *session, command string) {
 	defer func() { m.emit(EventExec, result) }()
 
 	if s.client == nil || s.isClosed() {
-		result.Error = "会话已关闭"
+		result.Error = "session is closed"
 		result.ExitCode = -1
 		return
 	}
@@ -222,7 +222,7 @@ func (m *Manager) execOne(s *session, command string) {
 		result.ExitCode = 0
 	case *ssh.ExitError:
 		result.ExitCode = e.ExitStatus()
-		result.Error = fmt.Sprintf("退出码 %d", e.ExitStatus())
+		result.Error = fmt.Sprintf("exit code %d", e.ExitStatus())
 	default:
 		result.ExitCode = -1
 		result.Error = err.Error()

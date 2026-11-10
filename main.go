@@ -27,12 +27,12 @@ func init() {
 func main() {
 	sshService, err := NewSSHService()
 	if err != nil {
-		log.Fatalf("初始化 SSH 服务失败: %v", err)
+		log.Fatalf("failed to initialize SSH service: %v", err)
 	}
 
 	app := application.New(application.Options{
 		Name:        "Shuttle",
-		Description: "多主机 SSH 批量管理工具",
+		Description: "Multi-host SSH batch management tool",
 		Services: []application.Service{
 			application.NewService(sshService),
 		},
@@ -45,7 +45,7 @@ func main() {
 	})
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "Shuttle - SSH 批量管理",
+		Title:     "Shuttle - SSH Manager",
 		Width:     1360,
 		Height:    860,
 		MinWidth:  1080,

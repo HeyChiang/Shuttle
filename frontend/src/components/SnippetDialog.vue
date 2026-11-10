@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // 代码块编辑弹窗。传入 snippet 时打开；保存后通过 submit 事件回传副本。
 import { ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { blankSnippet, type Snippet } from "../snippets";
 import CodeEditor from "./CodeEditor.vue";
 
 const props = defineProps<{ snippet: Snippet | null }>();
+const { t } = useI18n();
 const emit = defineEmits<{
   (e: "submit", snippet: Snippet): void;
   (e: "cancel"): void;
@@ -24,7 +26,7 @@ watch(
 
 function submit() {
   if (!form.value.code.trim()) {
-    error.value = "请填写代码内容";
+    error.value = t("snippetDialog.errCode");
     return;
   }
   emit("submit", { ...form.value });
@@ -35,8 +37,8 @@ function submit() {
   <div class="mask" @click.self="emit('cancel')" @keydown.esc="emit('cancel')">
     <div class="dialog">
       <header>
-        <h3>{{ snippet ? "编辑代码块" : "新增代码块" }}</h3>
-        <button class="close" title="关闭" @click="emit('cancel')">
+        <h3>{{ snippet ? t("snippetDialog.editTitle") : t("snippetDialog.newTitle") }}</h3>
+        <button class="close" :title="t('common.close')" @click="emit('cancel')">
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
             <path
               d="M3.5 3.5l9 9M12.5 3.5l-9 9"
@@ -51,16 +53,16 @@ function submit() {
 
       <div class="form">
         <label>
-          <span>名称</span>
-          <input v-model="form.name" placeholder="例如：磁盘巡检" />
+          <span>{{ t("snippetDialog.nameLabel") }}</span>
+          <input v-model="form.name" :placeholder="t('snippetDialog.namePlaceholder')" />
         </label>
 
         <label>
-          <span>代码</span>
+          <span>{{ t("snippetDialog.codeLabel") }}</span>
           <CodeEditor
             v-model="form.code"
             height="240px"
-            placeholder="支持多行脚本，例如：&#10;df -h&#10;free -m"
+            :placeholder="t('snippetDialog.codePlaceholder')"
             @keydown.ctrl.enter.prevent="submit"
             @keydown.meta.enter.prevent="submit"
           />
@@ -70,10 +72,10 @@ function submit() {
       <p v-if="error" class="error">{{ error }}</p>
 
       <footer>
-        <span class="hint">Ctrl + Enter 保存</span>
+        <span class="hint">{{ t("snippetDialog.hint") }}</span>
         <div class="actions">
-          <button class="ghost" @click="emit('cancel')">取消</button>
-          <button class="primary" @click="submit">{{ snippet ? "保存" : "创建并保存" }}</button>
+          <button class="ghost" @click="emit('cancel')">{{ t("common.cancel") }}</button>
+          <button class="primary" @click="submit">{{ snippet ? t("common.save") : t("common.createSave") }}</button>
         </div>
       </footer>
     </div>

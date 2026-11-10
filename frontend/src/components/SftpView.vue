@@ -2,6 +2,7 @@
 // SFTP 工作区：左右两侧各自独立，可分别选择本地或远程服务器。
 // 默认左侧本地、右侧服务器列表（搜索选择），文件通过拖拽在两侧之间传输。
 import { computed, onBeforeUnmount, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { HostConfig } from "../../bindings/shuttle/internal/sshcore/models";
 import { transfers } from "../store";
@@ -12,6 +13,8 @@ const props = defineProps<{
 }>();
 
 type Kind = "local" | "remote";
+
+const { t } = useI18n();
 
 const leftKind = ref<Kind>("local");
 const leftHost = ref("");
@@ -63,22 +66,30 @@ onBeforeUnmount(() => {
 
     <div v-if="tasks.length" class="progress">
       <div
-        v-for="t in tasks"
-        :key="t.sessionId + t.direction + t.name"
+        v-for="task in tasks"
+        :key="task.sessionId + task.direction + task.name"
         class="task"
       >
-        <span class="tnm" :title="t.name">{{ t.name }}</span>
+        <span class="tnm" :title="task.name">{{ task.name }}</span>
         <div class="track">
           <div
             class="fill"
-            :class="{ fail: !!t.error }"
+            :class="{ fail: !!task.error }"
             :style="{
-              width: t.total ? Math.min(100, (t.transferred / t.total) * 100) + '%' : '100%',
+              width: task.total
+                ? Math.min(100, (task.transferred / task.total) * 100) + '%'
+                : '100%',
             }"
           />
         </div>
         <span class="tstate">
-          {{ t.error ? "失败" : t.done ? "完成" : `${human(t.transferred)} / ${human(t.total)}` }}
+          {{
+            task.error
+              ? t("common.failed")
+              : task.done
+                ? t("common.done")
+                : `${human(task.transferred)} / ${human(task.total)}`
+          }}
         </span>
       </div>
     </div>
