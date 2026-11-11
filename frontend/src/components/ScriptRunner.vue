@@ -218,28 +218,33 @@ function toggleDrawer() {
   width: 30px;
   height: 28px;
   padding: 0;
-  border: 1px solid var(--win-stroke);
+  border: 1px solid transparent;
   border-radius: 7px;
-  background: var(--win-fill);
-  color: var(--win-text);
+  background: transparent;
+  color: var(--win-text-2);
   cursor: default;
 }
 .code-btn:hover {
   background: var(--win-fill-hover);
-  border-color: var(--win-stroke-strong);
 }
+/* 仅抽屉打开时高亮，避免默认态看起来像被选中 */
 .code-btn.on {
   background: var(--win-fill-press);
-  border-color: var(--win-stroke-strong);
 }
 .code-btn svg {
   width: 15px;
   height: 15px;
   fill: none;
-  stroke: var(--win-accent);
+  stroke: var(--win-text-2);
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.code-btn:hover svg {
+  stroke: var(--win-text);
+}
+.code-btn.on svg {
+  stroke: var(--win-accent);
 }
 
 /* 右侧抽屉：从窗口右边缘滑出 */
