@@ -230,6 +230,11 @@ func (s *session) upload(localPath, remoteDir string) error {
 		return fmt.Errorf("%s is a directory; directory upload is not supported", filepath.Base(localPath))
 	}
 
+	// 目标目录不存在时逐级创建，脚本附件可直接上传到新目录。
+	if err := c.MkdirAll(absDir); err != nil {
+		return fmt.Errorf("failed to create remote directory %s: %w", absDir, err)
+	}
+
 	progress := newProgress(s.emit, s.cfg.SessionID, filepath.Base(localPath), "upload", stat.Size())
 	err = sendLocalFile(c, localPath, absDir, progress)
 	progress.finish(err)
@@ -270,7 +275,10 @@ func (s *session) download(remotePath, localDir string) error {
 type progressWriter struct{ p *transferProgress }
 
 func (w progressWriter) Write(b []byte) (int, error) {
-	w.p.add(int64(len(b)))
+	// 批量执行等场景不需要进度事件，progress 允许为空。
+	if w.p != nil {
+		w.p.add(int64(len(b)))
+	}
 	return len(b), nil
 }
 

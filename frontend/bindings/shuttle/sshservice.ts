@@ -17,6 +17,15 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as sshcore$0 from "./internal/sshcore/models.js";
 
 /**
+ * BatchExec connects to every supplied profile with a short-lived connection,
+ * uploads attachments (when any) and runs the script, streaming per-host
+ * progress through "ssh:batchExec".
+ */
+export function BatchExec(hosts: sshcore$0.HostConfig[] | null, command: string, files: string[] | null, targetDir: string, runID: string): $CancellablePromise<void> {
+    return $Call.ByID(1986632856, hosts, command, files, targetDir, runID);
+}
+
+/**
  * CancelImport drops a pending encrypted import when the user cancels the
  * password prompt.
  */

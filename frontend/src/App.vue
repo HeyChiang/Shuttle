@@ -7,18 +7,12 @@ import { localeOptions, setLocale, type Locale } from "./i18n";
 import * as SSH from "../bindings/shuttle/sshservice";
 import type { HostConfig } from "../bindings/shuttle/internal/sshcore/models";
 import HostDialog from "./components/HostDialog.vue";
+import BatchRun from "./components/BatchRun.vue";
 import ScriptRunner from "./components/ScriptRunner.vue";
 import SftpView from "./components/SftpView.vue";
 import SnippetDialog from "./components/SnippetDialog.vue";
 import TerminalPane from "./components/TerminalPane.vue";
-import {
-  deleteSnippet,
-  firstLine,
-  snippets,
-  upsertSnippet,
-  type Snippet,
-} from "./snippets";
-import { highlightShell } from "./highlight";
+import { deleteSnippet, snippets, upsertSnippet, type Snippet } from "./snippets";
 import {
   activeId,
   blankHost,
@@ -59,7 +53,7 @@ const dialogOpen = ref(false);
 const editing = ref<HostConfig | null>(null);
 const isMax = ref(false);
 /** 当前页面：主页 / 代码块 / SFTP / 终端 */
-const page = ref<"home" | "snippets" | "sftp" | "term">("home");
+const page = ref<"home" | "snippets" | "batch" | "sftp" | "term">("home");
 /** 顶栏搜索面板 */
 const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement>();
@@ -1190,7 +1184,7 @@ function closeSession(id: string) {
 
     <!-- 左侧导航列表：主页 / 代码块页展示，终端 / SFTP 页全屏时不占用空间 -->
     <aside
-      v-if="page === 'home' || page === 'snippets'"
+      v-if="page === 'home' || page === 'snippets' || page === 'batch'"
       class="rail"
       style="--wails-draggable: no-drag"
     >
@@ -1221,6 +1215,19 @@ function closeSession(id: string) {
             <path d="M10.9 3.8l-1.8 12.4" />
           </svg>
           <span>{{ t("app.navSnippets") }}</span>
+        </button>
+
+        <button
+          class="rail-item"
+          :class="{ on: page === 'batch' }"
+          :title="t('app.navBatch')"
+          @click="page = 'batch'"
+        >
+          <svg viewBox="0 0 20 20">
+            <circle cx="10" cy="10" r="6.8" />
+            <path d="M8.2 6.9l5 3.1-5 3.1z" />
+          </svg>
+          <span>{{ t("app.navBatch") }}</span>
         </button>
       </nav>
 
@@ -1541,6 +1548,10 @@ function closeSession(id: string) {
         </div>
       </section>
 
+      <section v-show="page === 'batch'" class="list-view">
+        <BatchRun />
+      </section>
+
       <section v-show="page === 'snippets'" class="list-view">
         <div class="list-head">
           <div class="lh-text">
@@ -1553,7 +1564,7 @@ function closeSession(id: string) {
             v-for="s in filteredSnippets"
             :key="s.id"
             class="card snippet-card"
-            @dblclick="openEditSnippet(s)"
+            @click="openEditSnippet(s)"
           >
             <div class="card-top">
               <span class="snippet-icon">
@@ -1565,7 +1576,7 @@ function closeSession(id: string) {
               </span>
               <div class="who">
                 <strong>{{ s.name }}</strong>
-                <small>{{ t("snippets.lines", { n: snippetLines(s.code), first: firstLine(s.code) }) }}</small>
+                <small>{{ t("snippets.lines", { n: snippetLines(s.code) }) }}</small>
               </div>
 
               <div class="more snippet-actions">
@@ -1589,8 +1600,6 @@ function closeSession(id: string) {
                 </button>
               </div>
             </div>
-
-            <pre class="snippet-code"><code v-html="highlightShell(s.code)" /></pre>
           </article>
         </div>
 
@@ -1673,12 +1682,14 @@ function closeSession(id: string) {
       @cancel="dialogOpen = false"
     />
 
-    <SnippetDialog
-      v-if="snippetDialogOpen"
-      :snippet="editingSnippet"
-      @submit="submitSnippet"
-      @cancel="snippetDialogOpen = false"
-    />
+    <Teleport to="body">
+      <SnippetDialog
+        v-if="snippetDialogOpen"
+        :snippet="editingSnippet"
+        @submit="submitSnippet"
+        @cancel="snippetDialogOpen = false"
+      />
+    </Teleport>
 
     <!-- 删除确认：自定义弹窗，替代浏览器原生 confirm -->
     <Teleport to="body">
@@ -2834,7 +2845,7 @@ function closeSession(id: string) {
   fill: currentColor;
 }
 
-/* 代码块卡片：图标 + 名称 + 代码预览 */
+/* 代码块卡片：图标 + 名称 + 行数 */
 .snippet-card {
   gap: 10px;
 }
@@ -2856,21 +2867,6 @@ function closeSession(id: string) {
   stroke-width: 1.3;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-.snippet-code {
-  margin: 0;
-  max-height: 120px;
-  overflow: hidden;
-  padding: 10px 12px;
-  border: 1px solid var(--win-stroke);
-  border-radius: 8px;
-  background: var(--win-term);
-  color: var(--win-text-2);
-  font-family: var(--win-mono);
-  font-size: 11.5px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .snippet-actions {
   display: flex;

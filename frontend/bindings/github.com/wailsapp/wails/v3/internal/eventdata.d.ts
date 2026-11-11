@@ -13,6 +13,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "sftp:progress": sshcore$0.TransferEvent;
+            "ssh:batchExec": sshcore$0.BatchExecEvent;
             "ssh:closed": sshcore$0.ClosedEvent;
             "ssh:data": sshcore$0.DataEvent;
             "ssh:exec": sshcore$0.ExecEvent;

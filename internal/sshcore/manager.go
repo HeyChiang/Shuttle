@@ -1,13 +1,18 @@
 package sshcore
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
@@ -234,6 +239,129 @@ func decoderFor(name string) transform.Transformer {
 		return transform.Nop
 	}
 	return encodingFor(name).NewDecoder()
+}
+
+// BatchExec runs command on each profile over a short-lived connection, so the
+// hosts do not need an open terminal session. Attachments are uploaded to
+// targetDir before the script starts. Progress and results are pushed through
+// EventBatchExec; runID lets the caller ignore stale runs.
+func (m *Manager) BatchExec(cfgs []HostConfig, command string, files []string, targetDir, runID string) {
+	command = strings.TrimRight(command, "\r\n")
+	if strings.TrimSpace(command) == "" || len(cfgs) == 0 {
+		return
+	}
+	for _, cfg := range cfgs {
+		cfg = applyDefaults(cfg)
+		go func() {
+			start := BatchExecEvent{
+				RunID:   runID,
+				HostID:  cfg.ID,
+				Name:    cfg.Name,
+				Command: command,
+				Status:  "running",
+			}
+			if len(files) > 0 {
+				start.Status = "uploading"
+			}
+			if start.HostID == "" {
+				start.HostID = cfg.Host
+			}
+			m.emit(EventBatchExec, start)
+
+			// 附件传完再执行脚本，让前端把状态从“上传中”切到“执行中”。
+			onUploaded := func() {
+				start.Status = "running"
+				m.emit(EventBatchExec, start)
+			}
+			output, exitCode, err := runOnProfile(cfg, command, files, targetDir, onUploaded)
+			result := start
+			result.Output = output
+			result.ExitCode = exitCode
+			result.Status = "done"
+			if err != nil {
+				result.Error = err.Error()
+				// 退出码 >= 0 说明连接和命令都正常，只是脚本本身返回非零。
+				if exitCode < 0 {
+					result.Status = "error"
+				}
+			}
+			m.emit(EventBatchExec, result)
+		}()
+	}
+}
+
+// runOnProfile connects with a profile's stored credentials, uploads attachments
+// when configured, runs the command once and returns decoded combined output
+// plus the remote exit status.
+func runOnProfile(cfg HostConfig, command string, files []string, targetDir string, onUploaded func()) (string, int, error) {
+	client, err := dialClient(cfg)
+	if err != nil {
+		return "", -1, err
+	}
+	defer func() { _ = client.Close() }()
+
+	if len(files) > 0 {
+		if err := uploadFilesToProfile(client, files, targetDir); err != nil {
+			return "", -1, fmt.Errorf("failed to upload attachments: %w", err)
+		}
+		if onUploaded != nil {
+			onUploaded()
+		}
+	}
+
+	sshSession, err := client.NewSession()
+	if err != nil {
+		return "", -1, err
+	}
+	defer func() { _ = sshSession.Close() }()
+
+	raw, err := sshSession.CombinedOutput(command)
+	output, _, _ := transform.String(decoderFor(cfg.Encoding), string(raw))
+	if err != nil {
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
+			return output, exitErr.ExitStatus(), err
+		}
+		return output, -1, err
+	}
+	return output, 0, nil
+}
+
+// uploadFilesToProfile copies local attachments into targetDir on the remote
+// host, creating the directory (and its parents) when missing.
+func uploadFilesToProfile(client *ssh.Client, files []string, targetDir string) error {
+	c, err := sftp.NewClient(client)
+	if err != nil {
+		return fmt.Errorf("failed to open SFTP: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	dir := strings.TrimSpace(targetDir)
+	absDir := path.Clean(dir)
+	if !strings.HasPrefix(dir, "/") {
+		home, err := c.Getwd()
+		if err != nil || home == "" {
+			home = "/"
+		}
+		absDir = path.Join(home, dir)
+	}
+	if err := c.MkdirAll(absDir); err != nil {
+		return fmt.Errorf("failed to create remote directory %s: %w", absDir, err)
+	}
+
+	for _, localPath := range files {
+		stat, err := os.Stat(localPath)
+		if err != nil {
+			return fmt.Errorf("failed to read local file %s: %w", filepath.Base(localPath), err)
+		}
+		if stat.IsDir() {
+			return fmt.Errorf("%s is a directory; directory upload is not supported", filepath.Base(localPath))
+		}
+		if err := sendLocalFile(c, localPath, absDir, nil); err != nil {
+			return fmt.Errorf("failed to upload %s: %w", filepath.Base(localPath), err)
+		}
+	}
+	return nil
 }
 
 func encodingFor(name string) encoding.Encoding {

@@ -12,6 +12,7 @@ import {
   isConnected,
   reconnect,
   registerTerminal,
+  registerTerminalFocus,
   resizeSession,
   sendKeys,
 } from "../store";
@@ -39,6 +40,7 @@ const bodyEl = ref<HTMLDivElement>();
 const term = shallowRef<Terminal>();
 let fit: FitAddon | undefined;
 let unregister: (() => void) | undefined;
+let unregisterFocus: (() => void) | undefined;
 let observer: ResizeObserver | undefined;
 
 const connected = computed(() => isConnected(props.session));
@@ -218,6 +220,8 @@ onMounted(() => {
 
   // 后端输出 -> 终端
   unregister = registerTerminal(props.session.id, (data) => instance.write(data));
+  // 代码块执行等外部操作结束后，把焦点交还给终端
+  unregisterFocus = registerTerminalFocus(props.session.id, () => instance.focus());
 
   // 用户按键 -> 后端（同步输入时广播到全部会话）
   instance.onData((data) => sendKeys(props.session.id, data));
@@ -255,6 +259,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   observer?.disconnect();
   unregister?.();
+  unregisterFocus?.();
   term.value?.dispose();
 });
 

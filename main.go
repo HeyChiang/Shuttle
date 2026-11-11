@@ -21,6 +21,7 @@ func init() {
 	application.RegisterEvent[sshcore.StatusEvent](sshcore.EventStatus)
 	application.RegisterEvent[sshcore.ClosedEvent](sshcore.EventClosed)
 	application.RegisterEvent[sshcore.ExecEvent](sshcore.EventExec)
+	application.RegisterEvent[sshcore.BatchExecEvent](sshcore.EventBatchExec)
 	application.RegisterEvent[sshcore.TransferEvent](sshcore.EventTransfer)
 }
 

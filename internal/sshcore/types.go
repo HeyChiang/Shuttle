@@ -66,11 +66,12 @@ type RemoteFile struct {
 
 // Event names emitted towards the frontend.
 const (
-	EventData     = "ssh:data"
-	EventStatus   = "ssh:status"
-	EventClosed   = "ssh:closed"
-	EventExec     = "ssh:exec"
-	EventTransfer = "sftp:progress"
+	EventData      = "ssh:data"
+	EventStatus    = "ssh:status"
+	EventClosed    = "ssh:closed"
+	EventExec      = "ssh:exec"
+	EventBatchExec = "ssh:batchExec"
+	EventTransfer  = "sftp:progress"
 )
 
 // DataEvent carries decoded terminal output for a single session.
@@ -103,6 +104,18 @@ type ExecEvent struct {
 	Output    string `json:"output"`
 	ExitCode  int    `json:"exitCode"`
 	Error     string `json:"error"`
+}
+
+// BatchExecEvent reports the state of one host in a batch script run.
+type BatchExecEvent struct {
+	RunID    string `json:"runId"`
+	HostID   string `json:"hostId"`
+	Name     string `json:"name"`
+	Command  string `json:"command"`
+	Status   string `json:"status"` // running | done | error
+	Output   string `json:"output"`
+	ExitCode int    `json:"exitCode"`
+	Error    string `json:"error"`
 }
 
 // TransferEvent reports upload/download progress.

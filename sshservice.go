@@ -114,6 +114,9 @@ func (s *SSHService) ImportHosts(passphrase string) ([]sshcore.HostConfig, error
 		var err error
 		path, err = dialog.PromptForSingleSelection()
 		if err != nil {
+			if isDialogCancelled(err) {
+				return nil, nil
+			}
 			return nil, err
 		}
 		if path == "" {
@@ -186,6 +189,23 @@ func (s *SSHService) Exec(ids []string, command string) error {
 		return fmt.Errorf("command must not be empty")
 	}
 	s.mgr.Exec(ids, command)
+	return nil
+}
+
+// BatchExec connects to every supplied profile with a short-lived connection,
+// uploads attachments (when any) and runs the script, streaming per-host
+// progress through "ssh:batchExec".
+func (s *SSHService) BatchExec(hosts []sshcore.HostConfig, command string, files []string, targetDir, runID string) error {
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("script must not be empty")
+	}
+	if len(hosts) == 0 {
+		return fmt.Errorf("no hosts selected")
+	}
+	if len(files) > 0 && strings.TrimSpace(targetDir) == "" {
+		return fmt.Errorf("target directory is required for attachments")
+	}
+	s.mgr.BatchExec(hosts, command, files, strings.TrimSpace(targetDir), runID)
 	return nil
 }
 
@@ -337,6 +357,9 @@ func (s *SSHService) PickFiles(title string) ([]string, error) {
 	dialog.SetTitle(orDefault(title, "Select files to upload"))
 	result, err := dialog.PromptForMultipleSelection()
 	if err != nil {
+		if isDialogCancelled(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return result, nil
@@ -351,6 +374,9 @@ func (s *SSHService) PickFile(title string) (string, error) {
 	dialog.SetTitle(orDefault(title, "Select file"))
 	result, err := dialog.PromptForSingleSelection()
 	if err != nil {
+		if isDialogCancelled(err) {
+			return "", nil
+		}
 		return "", err
 	}
 	return result, nil
@@ -367,9 +393,18 @@ func (s *SSHService) PickDirectory(title string) (string, error) {
 	dialog.SetTitle(orDefault(title, "Select directory"))
 	result, err := dialog.PromptForSingleSelection()
 	if err != nil {
+		if isDialogCancelled(err) {
+			return "", nil
+		}
 		return "", err
 	}
 	return result, nil
+}
+
+// isDialogCancelled reports whether the native file dialog was dismissed by the
+// user. Cancelling is not a failure, so callers can treat it as "nothing picked".
+func isDialogCancelled(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "cancelled")
 }
 
 func orDefault(value, fallback string) string {

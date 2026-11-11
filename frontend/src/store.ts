@@ -246,6 +246,22 @@ export function registerTerminal(id: string, sink: DataSink): () => void {
   };
 }
 
+type FocusSink = () => void;
+const focusSinks = new Map<string, FocusSink>();
+
+/** 终端组件挂载时注册聚焦函数，返回注销函数。 */
+export function registerTerminalFocus(id: string, focus: FocusSink): () => void {
+  focusSinks.set(id, focus);
+  return () => {
+    if (focusSinks.get(id) === focus) focusSinks.delete(id);
+  };
+}
+
+/** 把键盘焦点交还给指定会话的终端，脚本执行后可直接继续输入。 */
+export function focusTerminal(id: string) {
+  focusSinks.get(id)?.();
+}
+
 // ---------------------------------------------------------------- 事件订阅
 
 let started = false;

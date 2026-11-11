@@ -7,6 +7,10 @@ export interface Snippet {
   id: string;
   name: string;
   code: string;
+  /** 执行前要上传到远端的本地文件路径 */
+  files: string[];
+  /** 附件的远端目标目录，目录不存在时自动创建 */
+  targetDir: string;
   updatedAt: number;
 }
 
@@ -24,6 +28,8 @@ function readStored(): Snippet[] {
         id: s.id,
         name: String(s.name || ""),
         code: String(s.code || ""),
+        files: Array.isArray(s.files) ? s.files.map(String) : [],
+        targetDir: String(s.targetDir || ""),
         updatedAt: Number(s.updatedAt) || 0,
       }));
   } catch {
@@ -52,7 +58,7 @@ export function newSnippetId(): string {
 }
 
 export function blankSnippet(): Snippet {
-  return { id: newSnippetId(), name: "", code: "", updatedAt: 0 };
+  return { id: newSnippetId(), name: "", code: "", files: [], targetDir: "", updatedAt: 0 };
 }
 
 /** 新增或更新代码块，未命名时用首行内容兜底 */

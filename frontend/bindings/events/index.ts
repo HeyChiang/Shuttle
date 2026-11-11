@@ -14,6 +14,11 @@ import "../github.com/wailsapp/wails/v3/internal/eventcreate.js";
 export const SftpProgress = "sftp:progress";
 
 /**
+ * Name of the custom event "ssh:batchExec".
+ */
+export const SshBatchExec = "ssh:batchExec";
+
+/**
  * Name of the custom event "ssh:closed".
  */
 export const SshClosed = "ssh:closed";

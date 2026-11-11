@@ -1,19 +1,41 @@
 <script setup lang="ts">
 // 代码块：在 SSH 终端页从右侧抽屉快速选择已保存脚本，执行或粘贴到当前会话。
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import * as SSH from "../../bindings/shuttle/sshservice";
 import {
   activeId,
+  focusTerminal,
   isConnected,
   sendKeys,
   sessionById,
   sessionLabel,
+  transfers,
 } from "../store";
 import { firstLine, snippets, type Snippet } from "../snippets";
 
 const { t } = useI18n();
 const open = ref(false);
 const maskEl = ref<HTMLElement>();
+/** 附件上传中，避免重复触发执行 */
+const busy = ref(false);
+/** 上传失败等执行错误 */
+const error = ref("");
+
+/** 当前会话正在上传的附件，用于展示实时进度 */
+const uploading = computed(() => {
+  const id = activeId.value;
+  return transfers.value.find(
+    (tr) => tr.sessionId === id && tr.direction === "upload" && !tr.done,
+  );
+});
+
+/** 当前文件的上传百分比 */
+const uploadPercent = computed(() => {
+  const tr = uploading.value;
+  if (!tr || tr.total <= 0) return 0;
+  return Math.min(100, Math.round((tr.transferred / tr.total) * 100));
+});
 
 /** 当前聚焦会话的名称，用于提示脚本发往哪台服务器 */
 const targetName = computed(() => {
@@ -36,14 +58,49 @@ function send(script: string, withEnter = true): boolean {
   return true;
 }
 
-/** 双击列表中的代码块：直接执行并关闭抽屉 */
-function runSnippet(snippet: Snippet) {
-  if (send(snippet.code)) open.value = false;
+/** 双击列表中的代码块：先上传附件，再执行并关闭抽屉 */
+async function runSnippet(snippet: Snippet) {
+  const s = sessionById(activeId.value);
+  if (!s || !connected.value || busy.value) return;
+  error.value = "";
+
+  const files = snippet.files ?? [];
+  const dir = (snippet.targetDir ?? "").trim();
+  if (files.length && !dir) {
+    error.value = t("runner.needTargetDir");
+    return;
+  }
+  if (files.length) {
+    busy.value = true;
+    try {
+      await SSH.Upload(s.id, dir, files);
+    } catch (e) {
+      error.value = t("runner.uploadFailed", { error: String(e) });
+      return;
+    } finally {
+      busy.value = false;
+    }
+  }
+  if (send(snippet.code)) closeDrawer();
 }
 
 /** 粘贴到终端但不回车，便于确认后再执行 */
 function pasteSnippet(snippet: Snippet) {
-  if (send(snippet.code, false)) open.value = false;
+  if (busy.value) return;
+  if (send(snippet.code, false)) closeDrawer();
+}
+
+function closeDrawer() {
+  open.value = false;
+  error.value = "";
+  // 抽屉关闭后把焦点还给终端，脚本执行完可以直接继续输入
+  const id = activeId.value;
+  nextTick(() => focusTerminal(id));
+}
+
+function toggleDrawer() {
+  if (open.value) closeDrawer();
+  else open.value = true;
 }
 </script>
 
@@ -53,7 +110,7 @@ function pasteSnippet(snippet: Snippet) {
       class="code-btn"
       :class="{ on: open }"
       :title="t('runner.tip')"
-      @click.stop="open = !open"
+      @click.stop="toggleDrawer"
     >
       <svg viewBox="0 0 20 20">
         <path d="M7.4 5.4L3 10l4.4 4.6" />
@@ -69,8 +126,8 @@ function pasteSnippet(snippet: Snippet) {
       ref="maskEl"
       class="drawer-mask"
       tabindex="-1"
-      @click.self="open = false"
-      @keydown.esc="open = false"
+      @click.self="closeDrawer"
+      @keydown.esc="closeDrawer"
     >
       <aside class="code-drawer" role="dialog" :aria-label="t('runner.title')">
         <header class="drawer-head">
@@ -80,8 +137,25 @@ function pasteSnippet(snippet: Snippet) {
               {{ connected ? t("runner.target", { name: targetName }) : t("runner.disconnected") }}
             </span>
           </div>
-          <button class="code-close" :title="t('common.close')" @click="open = false">×</button>
+          <button class="code-close" :title="t('common.close')" @click="closeDrawer">×</button>
         </header>
+
+        <div v-if="busy" class="run-status">
+          <div class="run-line">
+            <span class="run-text">
+              {{
+                uploading
+                  ? t("runner.uploadingFile", { name: uploading.name })
+                  : t("runner.uploading")
+              }}
+            </span>
+            <span class="run-percent">{{ uploadPercent }}%</span>
+          </div>
+          <div class="run-bar">
+            <div class="run-bar-fill" :style="{ width: uploadPercent + '%' }" />
+          </div>
+        </div>
+        <p v-else-if="error" class="run-error">{{ error }}</p>
 
         <div class="drawer-body">
           <section class="drawer-section list-section">
@@ -95,13 +169,28 @@ function pasteSnippet(snippet: Snippet) {
               >
                 <span class="snippet-text">
                   <span class="code-item-name">{{ s.name }}</span>
-                  <span class="code-item-meta">{{ firstLine(s.code) }}</span>
+                  <span class="code-item-meta">
+                    {{ firstLine(s.code) }}
+                    <template v-if="s.files?.length">
+                      · {{ t("runner.attachments", { n: s.files.length }) }}
+                    </template>
+                  </span>
                 </span>
                 <div class="item-actions">
-                  <button class="act-btn" :title="t('runner.run')" @click="runSnippet(s)">
+                  <button
+                    class="act-btn"
+                    :title="t('runner.run')"
+                    :disabled="busy"
+                    @click="runSnippet(s)"
+                  >
                     {{ t("runner.run") }}
                   </button>
-                  <button class="act-btn" :title="t('runner.paste')" @click="pasteSnippet(s)">
+                  <button
+                    class="act-btn"
+                    :title="t('runner.paste')"
+                    :disabled="busy"
+                    @click="pasteSnippet(s)"
+                  >
                     {{ t("runner.paste") }}
                   </button>
                 </div>
@@ -206,6 +295,52 @@ function pasteSnippet(snippet: Snippet) {
 }
 .code-target.err {
   color: var(--win-warn);
+}
+.run-status,
+.run-error {
+  flex: none;
+  margin: 0;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--win-divider);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.run-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--win-text-2);
+}
+.run-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.run-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-percent {
+  flex: none;
+  color: var(--win-text-3);
+  font-family: var(--win-mono);
+}
+.run-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--win-fill);
+  overflow: hidden;
+}
+.run-bar-fill {
+  height: 100%;
+  background: var(--win-accent);
+  transition: width 0.15s linear;
+}
+.run-error {
+  color: var(--win-err);
 }
 .code-close {
   display: grid;
@@ -319,6 +454,9 @@ function pasteSnippet(snippet: Snippet) {
 }
 .act-btn:active {
   background: var(--win-fill-press);
+}
+.act-btn:disabled {
+  opacity: 0.5;
 }
 .code-empty {
   margin: 0;
