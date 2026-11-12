@@ -271,14 +271,12 @@ export default {
   sftp: {
     connectFailed: "Failed to connect to {host}: {error}",
     transferFailed: "Transfer failed: {error}",
-    downloaded: "Downloaded {n} file(s) to {dir}",
-    uploaded: "Uploaded {n} file(s) to {host}:{dir}",
-    transferred: "Transferred {n} file(s) to {host}:{dir}",
     localNotReady: "The local folder is not ready yet",
-    overwrite:
-      "These files already exist in the target folder: {files}{more}\nContinuing will overwrite them. Continue?",
-    overwriteMore: " and {n} more",
-    listSeparator: ", ",
+    overwriteTitle: "Files already exist",
+    overwriteDesc:
+      "The following files already exist in {dir}. Continuing will overwrite them.",
+    overwriteConfirm: "Overwrite",
+    overwriteMore: "{n} more files",
     busy: "Transferring…",
     change: "Change",
     pickerPlaceholder: "Search servers: name, IP, group",
@@ -312,7 +310,6 @@ export default {
     failed: "Failed to {label}: {error}",
     pickUploadTitle: "Choose files to upload",
     pickDirTitle: "Choose a local folder to save to",
-    uploadedMsg: "Uploaded {n} file(s) to {dir}",
     downloadedMsg: "Downloaded {n} file(s) to {dir}",
     created: "Created {name}",
     deleted: "Deleted",

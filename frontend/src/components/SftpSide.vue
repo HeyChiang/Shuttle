@@ -36,7 +36,6 @@ const token = computed(() =>
 const connected = ref(false);
 const connecting = ref(false);
 const error = ref("");
-const notice = ref("");
 const busy = ref(false);
 const cwd = ref("");
 const localDir = ref("");
@@ -50,6 +49,23 @@ const queryEl = ref<HTMLInputElement>();
 let activeToken = "";
 /** 连接代次，避免快速切换时旧连接覆盖新状态 */
 let gen = 0;
+
+/** 覆盖确认弹窗：存在同名文件时等待用户选择，取消则中止传输 */
+interface ConflictState {
+  dir: string;
+  files: string[];
+  resolve: (ok: boolean) => void;
+}
+
+const conflict = ref<ConflictState | null>(null);
+const conflictEl = ref<HTMLElement>();
+
+function settleConflict(ok: boolean) {
+  if (!conflict.value) return;
+  const pending = conflict.value;
+  conflict.value = null;
+  pending.resolve(ok);
+}
 
 const filteredHosts = computed(() => {
   const q = query.value.trim().toLowerCase();
@@ -139,7 +155,7 @@ watch(
     connecting.value = false;
     cwd.value = "";
     error.value = "";
-    notice.value = "";
+    settleConflict(false);
     if (t) {
       picker.value = false;
       void ensure(t);
@@ -164,15 +180,14 @@ watch(picker, (open) => {
 
 // ------------------------------------------------------------- 传输动作
 
-async function run(okMessage: () => string, work: () => Promise<void>, after?: () => void) {
+/** 执行一次传输；成功时只刷新目录，不再弹出完成提示 */
+async function run(work: () => Promise<void>, after?: () => void) {
   if (busy.value) return;
   error.value = "";
-  notice.value = "";
   busy.value = true;
   try {
     await work();
     after?.();
-    notice.value = okMessage();
   } catch (e) {
     error.value = t("sftp.transferFailed", { error: String(e) });
   } finally {
@@ -201,7 +216,6 @@ async function conflictsIn(paths: string[], dir: string): Promise<string[]> {
   return [...new Set(paths.map(baseName))].filter((n) => exist.has(n));
 }
 
-/** 存在同名文件时提示将被覆盖，用户取消则中止传输 */
 async function confirmOverwrite(paths: string[], dir: string): Promise<boolean> {
   let hits: string[] = [];
   try {
@@ -211,9 +225,10 @@ async function confirmOverwrite(paths: string[], dir: string): Promise<boolean> 
     return true;
   }
   if (!hits.length) return true;
-  const preview = hits.slice(0, 5).join(t("sftp.listSeparator"));
-  const more = hits.length > 5 ? t("sftp.overwriteMore", { n: hits.length }) : "";
-  return window.confirm(t("sftp.overwrite", { files: preview, more }));
+  return new Promise<boolean>((resolve) => {
+    conflict.value = { dir, files: hits, resolve };
+    void nextTick(() => conflictEl.value?.focus());
+  });
 }
 
 async function onDropFiles(paths: string[], dir: string) {
@@ -229,7 +244,6 @@ async function onDropFiles(paths: string[], dir: string) {
     }
     if (!(await confirmOverwrite(paths, dir))) return;
     await run(
-      () => t("sftp.downloaded", { n: paths.length, dir }),
       () => SSH.SftpDownload(src.token, paths, dir),
       () => {
         localRev.value += 1;
@@ -243,7 +257,6 @@ async function onDropFiles(paths: string[], dir: string) {
   if (src.kind === "local") {
     if (!(await confirmOverwrite(paths, dir))) return;
     await run(
-      () => t("sftp.uploaded", { n: paths.length, host: hostLabel.value, dir }),
       () => SSH.SftpUpload(tk, dir, paths),
       () => {
         rev.value += 1;
@@ -254,7 +267,6 @@ async function onDropFiles(paths: string[], dir: string) {
   if (src.token === tk) return;
   if (!(await confirmOverwrite(paths, dir))) return;
   await run(
-    () => t("sftp.transferred", { n: paths.length, host: hostLabel.value, dir }),
     () => SSH.SftpTransfer(src.token, tk, paths, dir),
     () => {
       rev.value += 1;
@@ -264,6 +276,7 @@ async function onDropFiles(paths: string[], dir: string) {
 
 onBeforeUnmount(() => {
   gen += 1;
+  settleConflict(false);
   if (activeToken) void closeToken(activeToken);
 });
 </script>
@@ -348,8 +361,56 @@ onBeforeUnmount(() => {
     </div>
 
     <p v-if="error && connected" class="banner err">{{ error }}</p>
-    <p v-else-if="notice" class="banner ok">{{ notice }}</p>
   </section>
+
+  <!-- 覆盖确认：自定义弹窗，替代浏览器原生 confirm -->
+  <Teleport to="body">
+    <div
+      v-if="conflict"
+      ref="conflictEl"
+      class="conflict-mask"
+      tabindex="-1"
+      @click.self="settleConflict(false)"
+      @keydown.esc="settleConflict(false)"
+    >
+      <div class="conflict-dialog" role="alertdialog" aria-modal="true">
+        <div class="conflict-head">
+          <span class="conflict-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3.4L2.7 19.5a1.4 1.4 0 0 0 1.2 2.1h18.2a1.4 1.4 0 0 0 1.2-2.1L13.2 3.4a1.4 1.4 0 0 0-2.4 0z" />
+              <path d="M12 9.6v4.6M12 17.9v.1" />
+            </svg>
+          </span>
+          <div class="conflict-text">
+            <h3>{{ t("sftp.overwriteTitle") }}</h3>
+            <p>{{ t("sftp.overwriteDesc", { dir: conflict.dir }) }}</p>
+          </div>
+        </div>
+
+        <ul class="conflict-files">
+          <li v-for="name in conflict.files.slice(0, 6)" :key="name" :title="name">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 1.8h5l3 3v10.4H4z" />
+              <path d="M9 1.8v3h3" />
+            </svg>
+            <span>{{ name }}</span>
+          </li>
+          <li v-if="conflict.files.length > 6" class="conflict-more">
+            {{ t("sftp.overwriteMore", { n: conflict.files.length - 6 }) }}
+          </li>
+        </ul>
+
+        <div class="conflict-actions">
+          <button class="ghost" @click="settleConflict(false)">
+            {{ t("common.cancel") }}
+          </button>
+          <button class="primary" @click="settleConflict(true)">
+            {{ t("sftp.overwriteConfirm") }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -591,7 +652,155 @@ onBeforeUnmount(() => {
 .banner.err {
   color: var(--win-err);
 }
-.banner.ok {
-  color: var(--win-ok);
+/* 覆盖确认弹窗：与全局删除确认弹窗保持一致的深色浮层风格 */
+.conflict-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(2px);
+  outline: none;
+  animation: conflict-fade 0.12s ease-out;
+}
+.conflict-dialog {
+  width: min(420px, 92vw);
+  padding: 20px;
+  border: 1px solid var(--win-stroke-strong);
+  border-radius: 14px;
+  background: var(--win-flyout);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: conflict-pop 0.14s ease-out;
+}
+.conflict-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.conflict-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 180, 84, 0.14);
+  color: var(--win-warn);
+}
+.conflict-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.conflict-text {
+  min-width: 0;
+}
+.conflict-text h3 {
+  margin: 1px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--win-text);
+}
+.conflict-text p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--win-text-2);
+  overflow-wrap: anywhere;
+}
+.conflict-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  margin: 14px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--win-stroke);
+  border-radius: 10px;
+  background: var(--win-fill);
+  list-style: none;
+}
+.conflict-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 6px;
+  color: var(--win-text);
+  font-size: 12px;
+}
+.conflict-files li svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--win-text-3);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.conflict-files li span {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--win-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conflict-files li.conflict-more {
+  color: var(--win-text-3);
+  font-size: 11.5px;
+}
+.conflict-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.conflict-actions button {
+  height: 32px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: default;
+}
+.ghost {
+  background: var(--win-fill);
+  border-color: var(--win-stroke);
+  color: var(--win-text);
+}
+.ghost:hover {
+  background: var(--win-fill-hover);
+}
+.ghost:active {
+  background: var(--win-fill-press);
+}
+.primary {
+  background: var(--win-accent);
+  color: var(--win-accent-text);
+}
+.primary:hover {
+  background: var(--win-accent-hover);
+}
+.primary:active {
+  background: var(--win-accent-press);
+}
+@keyframes conflict-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes conflict-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
 }
 </style>

@@ -2,7 +2,6 @@
 // SFTP 工作区：左右两侧各自独立，可分别选择本地或远程服务器。
 // 默认左侧本地、右侧服务器列表（搜索选择），文件通过拖拽在两侧之间传输。
 import { computed, onBeforeUnmount, ref } from "vue";
-import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { HostConfig } from "../../bindings/shuttle/internal/sshcore/models";
 import { transfers } from "../store";
@@ -13,8 +12,6 @@ const props = defineProps<{
 }>();
 
 type Kind = "local" | "remote";
-
-const { t } = useI18n();
 
 const leftKind = ref<Kind>("local");
 const leftHost = ref("");
@@ -74,7 +71,6 @@ onBeforeUnmount(() => {
         <div class="track">
           <div
             class="fill"
-            :class="{ fail: !!task.error }"
             :style="{
               width: task.total
                 ? Math.min(100, (task.transferred / task.total) * 100) + '%'
@@ -83,13 +79,7 @@ onBeforeUnmount(() => {
           />
         </div>
         <span class="tstate">
-          {{
-            task.error
-              ? t("common.failed")
-              : task.done
-                ? t("common.done")
-                : `${human(task.transferred)} / ${human(task.total)}`
-          }}
+          {{ human(task.transferred) }} / {{ human(task.total) }}
         </span>
       </div>
     </div>
@@ -144,9 +134,6 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: var(--win-accent);
   transition: width 0.15s linear;
-}
-.fill.fail {
-  background: var(--win-err);
 }
 .tstate {
   text-align: right;

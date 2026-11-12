@@ -319,16 +319,16 @@ export function startEventBridge() {
       t.sessionId === payload.sessionId &&
       t.direction === payload.direction &&
       t.name === payload.name;
-    const at = transfers.value.findIndex((t) => !t.done && sameTask(t));
+
+    // 传输结束立即收起进度条，只在传输途中展示进度。
+    if (payload.done) {
+      transfers.value = transfers.value.filter((t) => !sameTask(t));
+      return;
+    }
+
+    const at = transfers.value.findIndex((t) => sameTask(t));
     if (at >= 0) transfers.value[at] = payload;
     else transfers.value = [payload, ...transfers.value].slice(0, 60);
-
-    // 完成的任务短暂保留后移除，让进度区始终只显示正在进行的传输。
-    if (payload.done) {
-      window.setTimeout(() => {
-        transfers.value = transfers.value.filter((t) => !(t.done && sameTask(t)));
-      }, 2000);
-    }
   });
 }
 

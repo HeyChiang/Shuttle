@@ -132,8 +132,19 @@ function toggleDrawer() {
       <aside class="code-drawer" role="dialog" :aria-label="t('runner.title')">
         <header class="drawer-head">
           <div class="code-title">
-            <strong>{{ t("runner.title") }}</strong>
+            <div class="code-title-row">
+              <span class="code-mark">
+                <svg viewBox="0 0 20 20">
+                  <path d="M7.4 5.4L3 10l4.4 4.6" />
+                  <path d="M12.6 5.4L17 10l-4.4 4.6" />
+                  <path d="M10.9 3.8l-1.8 12.4" />
+                </svg>
+              </span>
+              <strong>{{ t("runner.title") }}</strong>
+              <span v-if="snippets.length" class="code-count">{{ snippets.length }}</span>
+            </div>
             <span class="code-target" :class="{ err: !connected }">
+              <span class="target-dot" />
               {{ connected ? t("runner.target", { name: targetName }) : t("runner.disconnected") }}
             </span>
           </div>
@@ -167,23 +178,33 @@ function toggleDrawer() {
                 :title="s.name"
                 @dblclick="runSnippet(s)"
               >
+                <span class="item-icon">
+                  <svg viewBox="0 0 20 20">
+                    <path d="M7.4 5.4L3 10l4.4 4.6" />
+                    <path d="M12.6 5.4L17 10l-4.4 4.6" />
+                  </svg>
+                </span>
                 <span class="snippet-text">
                   <span class="code-item-name">{{ s.name }}</span>
-                  <span class="code-item-meta">
-                    {{ firstLine(s.code) }}
-                    <template v-if="s.files?.length">
-                      · {{ t("runner.attachments", { n: s.files.length }) }}
-                    </template>
-                  </span>
+                  <span class="code-item-meta">{{ firstLine(s.code) }}</span>
+                </span>
+                <span v-if="s.files?.length" class="file-chip">
+                  <svg viewBox="0 0 20 20">
+                    <path d="M14.2 9.4l-4.6 4.6a3.2 3.2 0 0 1-4.6-4.6l6-6a2.1 2.1 0 0 1 3 3l-6 6" />
+                  </svg>
+                  {{ t("runner.attachments", { n: s.files.length }) }}
                 </span>
                 <div class="item-actions">
                   <button
-                    class="act-btn"
+                    class="act-btn run"
                     :title="t('runner.run')"
                     :disabled="busy"
                     @click="runSnippet(s)"
                   >
-                    {{ t("runner.run") }}
+                    <svg viewBox="0 0 20 20">
+                      <path d="M7.6 4.8l7.2 5.2-7.2 5.2z" />
+                    </svg>
+                    <span>{{ t("runner.run") }}</span>
                   </button>
                   <button
                     class="act-btn"
@@ -191,13 +212,23 @@ function toggleDrawer() {
                     :disabled="busy"
                     @click="pasteSnippet(s)"
                   >
-                    {{ t("runner.paste") }}
+                    <svg viewBox="0 0 20 20">
+                      <rect x="7.4" y="3.4" width="7.2" height="4" rx="1" />
+                      <path d="M6.2 5.4H5.4a1.4 1.4 0 0 0-1.4 1.4v8.4a1.4 1.4 0 0 0 1.4 1.4h9.2a1.4 1.4 0 0 0 1.4-1.4V6.8a1.4 1.4 0 0 0-1.4-1.4h-.8" />
+                    </svg>
+                    <span>{{ t("runner.paste") }}</span>
                   </button>
                 </div>
               </div>
-              <p v-if="!snippets.length" class="code-empty">
-                {{ t("runner.empty") }}<br />{{ t("runner.emptyHint") }}
-              </p>
+              <div v-if="!snippets.length" class="code-empty">
+                <svg class="empty-icon" viewBox="0 0 20 20">
+                  <path d="M7.4 5.4L3 10l4.4 4.6" />
+                  <path d="M12.6 5.4L17 10l-4.4 4.6" />
+                  <path d="M10.9 3.8l-1.8 12.4" />
+                </svg>
+                <strong>{{ t("runner.empty") }}</strong>
+                <span>{{ t("runner.emptyHint") }}</span>
+              </div>
             </div>
           </section>
         </div>
@@ -274,32 +305,87 @@ function toggleDrawer() {
 }
 .drawer-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex: none;
-  padding: 16px 18px 12px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--win-divider);
+  background: var(--win-chrome);
 }
 .code-title {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
 }
-.code-title strong {
+.code-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.code-title-row strong {
   font-size: 14px;
   font-weight: 600;
 }
+/* 标题前的品牌色小图标 */
+.code-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+}
+.code-mark svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 代码块数量角标 */
+.code-count {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--win-fill);
+  color: var(--win-text-3);
+  font-family: var(--win-mono);
+  font-size: 10.5px;
+  line-height: 18px;
+  text-align: center;
+}
 .code-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   color: var(--win-text-3);
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 连接状态指示点：已连接绿色，未连接红色 */
+.target-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--win-ok);
+}
 .code-target.err {
-  color: var(--win-warn);
+  color: var(--win-err);
+}
+.code-target.err .target-dot {
+  background: var(--win-err);
 }
 .run-status,
 .run-error {
@@ -384,42 +470,77 @@ function toggleDrawer() {
   flex: 1;
   min-height: 0;
 }
-/* 代码块列表：直接平铺，不再套外框 */
+/* 代码块列表：卡片式行，悬停时浮出操作按钮 */
 .snippet-list {
   flex: 1;
   min-height: 0;
+  padding: 8px 8px 12px;
   overflow: auto;
 }
 .snippet-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   color: var(--win-text);
   text-align: left;
   cursor: default;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 .snippet-item:hover {
+  border-color: var(--win-stroke);
   background: var(--win-fill-hover);
 }
 .snippet-item:active {
   background: var(--win-fill-press);
 }
+/* 行首代码图标：高度与两行文字块一致，保证图标上下边缘与文字对齐 */
+.item-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--win-fill);
+  color: var(--win-text-3);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.item-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.snippet-item:hover .item-icon {
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+}
 .snippet-text {
   display: flex;
   flex: 1;
   flex-direction: column;
+  justify-content: center;
   gap: 2px;
   min-width: 0;
+  min-height: 34px;
 }
 .code-item-name {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -428,29 +549,70 @@ function toggleDrawer() {
   color: var(--win-text-3);
   font-family: var(--win-mono);
   font-size: 10.5px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 附件数量胶囊 */
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--win-fill);
+  color: var(--win-text-3);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.file-chip svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .item-actions {
   display: flex;
   flex: none;
-  gap: 4px;
+  gap: 6px;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transform: translateX(4px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
 }
 .snippet-item:hover .item-actions,
 .snippet-item:focus-within .item-actions {
   opacity: 1;
+  transform: none;
 }
 .act-btn {
-  height: 22px;
-  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
   border: 1px solid var(--win-stroke);
   border-radius: 6px;
   background: var(--win-card);
   color: var(--win-text-2);
   font-size: 11px;
+  font-weight: 500;
   cursor: default;
+}
+.act-btn svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .act-btn:hover {
   border-color: var(--win-stroke-strong);
@@ -463,13 +625,45 @@ function toggleDrawer() {
 .act-btn:disabled {
   opacity: 0.5;
 }
+/* 主操作「执行」用品牌色强调 */
+.act-btn.run {
+  border-color: transparent;
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+}
+.act-btn.run:hover {
+  background: var(--win-accent);
+  color: var(--win-accent-text);
+}
+.act-btn.run:hover svg {
+  stroke: var(--win-accent-text);
+}
 .code-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   margin: 0;
-  padding: 20px 10px;
+  padding: 42px 16px;
   color: var(--win-text-3);
-  font-size: 11px;
-  line-height: 1.7;
+  font-size: 11.5px;
   text-align: center;
+}
+.code-empty .empty-icon {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 4px;
+  fill: none;
+  stroke: var(--win-text-3);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.55;
+}
+.code-empty strong {
+  color: var(--win-text-2);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 @keyframes drawer-fade {
   from {

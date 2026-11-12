@@ -129,10 +129,7 @@ async function upload() {
   const ok = await run(t("files.labelUpload"), () =>
     SSH.Upload(props.sessionId, cwd.value, paths),
   );
-  if (ok !== undefined) {
-    notice.value = t("files.uploadedMsg", { n: paths.length, dir: cwd.value });
-    await refresh();
-  }
+  if (ok !== undefined) await refresh();
 }
 
 async function download() {
@@ -348,7 +345,6 @@ watch(ready, (v) => {
         <div class="track">
           <div
             class="fill"
-            :class="{ fail: !!task.error }"
             :style="{
               width: task.total
                 ? Math.min(100, (task.transferred / task.total) * 100) + '%'
@@ -357,13 +353,7 @@ watch(ready, (v) => {
           />
         </div>
         <span class="tstate">
-          {{
-            task.error
-              ? t("common.failed")
-              : task.done
-                ? t("common.done")
-                : `${human(task.transferred)} / ${human(task.total)}`
-          }}
+          {{ human(task.transferred) }} / {{ human(task.total) }}
         </span>
       </div>
     </div>
@@ -607,9 +597,6 @@ watch(ready, (v) => {
   border-radius: 999px;
   background: var(--win-accent);
   transition: width 0.15s linear;
-}
-.fill.fail {
-  background: var(--win-err);
 }
 .tstate {
   text-align: right;
