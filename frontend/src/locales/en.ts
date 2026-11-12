@@ -295,6 +295,10 @@ export default {
     homeFailed: "Failed to get the home directory: {error}",
     selectServer: "Select a server first",
     notConnected: "This session is not connected, so files cannot be browsed.",
+    deleteTitle: "Delete files",
+    deleteDesc: "Delete the {n} selected item(s)? Folders are removed along with their contents.",
+    deleteFailed: "Failed to delete: {error}",
+    renameFailed: "Failed to rename: {error}",
   },
   files: {
     busy: "Working…",

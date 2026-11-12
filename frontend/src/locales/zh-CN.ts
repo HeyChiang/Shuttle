@@ -290,6 +290,10 @@ export default {
     homeFailed: "获取家目录失败：{error}",
     selectServer: "请先选择服务器",
     notConnected: "会话未连接，无法浏览文件。",
+    deleteTitle: "删除文件",
+    deleteDesc: "确定删除选中的 {n} 个条目？目录将连同其中内容一起删除。",
+    deleteFailed: "删除失败：{error}",
+    renameFailed: "重命名失败：{error}",
   },
   files: {
     busy: "处理中…",

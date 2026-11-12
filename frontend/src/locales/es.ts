@@ -295,6 +295,10 @@ export default {
     homeFailed: "No se pudo obtener el directorio personal: {error}",
     selectServer: "Selecciona primero un servidor",
     notConnected: "La sesión no está conectada; no se pueden explorar archivos.",
+    deleteTitle: "Eliminar archivos",
+    deleteDesc: "¿Eliminar los {n} elementos seleccionados? Las carpetas se eliminarán con su contenido.",
+    deleteFailed: "No se pudo eliminar: {error}",
+    renameFailed: "No se pudo renombrar: {error}",
   },
   files: {
     busy: "Procesando…",

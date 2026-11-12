@@ -132,6 +132,20 @@ export function LocalHome(): $CancellablePromise<string> {
 }
 
 /**
+ * LocalRemove deletes a local file, or a directory when recursive is true.
+ */
+export function LocalRemove(target: string, recursive: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2377842202, target, recursive);
+}
+
+/**
+ * LocalRename renames or moves a local entry.
+ */
+export function LocalRename($from: string, to: string): $CancellablePromise<void> {
+    return $Call.ByID(1674571224, $from, to);
+}
+
+/**
  * Mkdir creates a remote directory.
  */
 export function Mkdir(id: string, dir: string): $CancellablePromise<void> {
@@ -255,6 +269,13 @@ export function SftpOpen(cfg: sshcore$0.HostConfig, token: string): $Cancellable
  */
 export function SftpRemove(token: string, target: string, recursive: boolean): $CancellablePromise<void> {
     return $Call.ByID(4273557846, token, target, recursive);
+}
+
+/**
+ * SftpRename renames or moves a remote entry.
+ */
+export function SftpRename(token: string, $from: string, to: string): $CancellablePromise<void> {
+    return $Call.ByID(2378222396, token, $from, to);
 }
 
 /**

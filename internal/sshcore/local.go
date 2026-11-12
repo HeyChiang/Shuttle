@@ -36,6 +36,34 @@ func LocalDrives() ([]string, error) {
 	return roots, nil
 }
 
+// LocalRemove deletes a local file, or a directory when recursive is true.
+func LocalRemove(target string, recursive bool) error {
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("failed to resolve local path: %w", err)
+	}
+	if recursive {
+		return os.RemoveAll(abs)
+	}
+	return os.Remove(abs)
+}
+
+// LocalRename renames or moves a local entry.
+func LocalRename(from, to string) error {
+	absFrom, err := filepath.Abs(from)
+	if err != nil {
+		return fmt.Errorf("failed to resolve local path: %w", err)
+	}
+	absTo, err := filepath.Abs(to)
+	if err != nil {
+		return fmt.Errorf("failed to resolve local path: %w", err)
+	}
+	if err := os.Rename(absFrom, absTo); err != nil {
+		return fmt.Errorf("failed to rename: %w", err)
+	}
+	return nil
+}
+
 // LocalList reads one local directory for the SFTP dual-pane browser.
 func LocalList(dir string) ([]RemoteFile, error) {
 	if strings.TrimSpace(dir) == "" {

@@ -300,6 +300,11 @@ func (s *SSHService) SftpRemove(token, target string, recursive bool) error {
 	return s.sftp.Remove(token, target, recursive)
 }
 
+// SftpRename renames or moves a remote entry.
+func (s *SSHService) SftpRename(token, from, to string) error {
+	return s.sftp.Rename(token, from, to)
+}
+
 // SftpUpload copies local files into a remote directory.
 func (s *SSHService) SftpUpload(token, remoteDir string, localPaths []string) error {
 	return s.sftp.Upload(token, remoteDir, localPaths)
@@ -330,6 +335,16 @@ func (s *SSHService) LocalDrives() ([]string, error) {
 // ListLocal lists one local directory for the dual-pane SFTP view.
 func (s *SSHService) ListLocal(dir string) ([]sshcore.RemoteFile, error) {
 	return sshcore.LocalList(dir)
+}
+
+// LocalRemove deletes a local file, or a directory when recursive is true.
+func (s *SSHService) LocalRemove(target string, recursive bool) error {
+	return sshcore.LocalRemove(target, recursive)
+}
+
+// LocalRename renames or moves a local entry.
+func (s *SSHService) LocalRename(from, to string) error {
+	return sshcore.LocalRename(from, to)
 }
 
 // --- native dialogs --------------------------------------------------------

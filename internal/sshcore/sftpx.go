@@ -183,6 +183,20 @@ func (m *SftpManager) Remove(token, target string, recursive bool) error {
 	return conn.sftp.Remove(abs)
 }
 
+// Rename renames or moves one remote entry.
+func (m *SftpManager) Rename(token, from, to string) error {
+	conn, err := m.get(token)
+	if err != nil {
+		return err
+	}
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if err := conn.sftp.Rename(conn.resolve(from), conn.resolve(to)); err != nil {
+		return fmt.Errorf("failed to rename: %w", err)
+	}
+	return nil
+}
+
 // Upload copies local files into a remote directory.
 func (m *SftpManager) Upload(token, remoteDir string, localPaths []string) error {
 	conn, err := m.get(token)

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // 独立的远端目录浏览器：基于 SFTP token 工作，不依赖终端会话。
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import * as SSH from "../../bindings/shuttle/sshservice";
 import type { RemoteFile } from "../../bindings/shuttle/internal/sshcore/models";
 import { beginSftpDrag, endSftpDrag, sftpDrag } from "../sftpDrag";
+import ConfirmDialog from "./ConfirmDialog.vue";
+import FileContextMenu from "./FileContextMenu.vue";
 
 const props = defineProps<{
   token: string;
@@ -40,6 +42,114 @@ function onRowClick(entry: RemoteFile, ev: MouseEvent) {
 
 function clearSelection() {
   if (selected.value.size) selected.value = new Set();
+}
+
+// ------------------------------------------------- 右键菜单 / 删除 / 重命名
+const menu = ref<{ x: number; y: number; entry: RemoteFile } | null>(null);
+/** 等待确认删除的条目 */
+const pendingDelete = ref<RemoteFile[] | null>(null);
+/** 操作类错误单独展示，避免覆盖文件列表 */
+const actionError = ref("");
+/** 正在内联重命名的条目路径 */
+const renaming = ref<string | null>(null);
+const renameValue = ref("");
+const renameInput = ref<HTMLInputElement | null>(null);
+
+function setRenameInput(el: unknown) {
+  renameInput.value = (el as HTMLInputElement | null) ?? null;
+}
+
+const selectedEntries = computed(() =>
+  entries.value.filter((e) => selected.value.has(e.path)),
+);
+
+function onRowContextMenu(entry: RemoteFile, ev: MouseEvent) {
+  ev.preventDefault();
+  if (!selected.value.has(entry.path)) selected.value = new Set([entry.path]);
+  menu.value = {
+    x: Math.min(ev.clientX, window.innerWidth - 186),
+    y: Math.min(ev.clientY, window.innerHeight - 124),
+    entry,
+  };
+}
+
+function closeMenu() {
+  menu.value = null;
+}
+
+function startRename() {
+  const entry = menu.value?.entry;
+  closeMenu();
+  if (!entry || selectedEntries.value.length !== 1) return;
+  renaming.value = entry.path;
+  renameValue.value = entry.name;
+  void nextTick(() => {
+    const el = renameInput.value;
+    if (!el) return;
+    el.focus();
+    // 默认选中主文件名，保留扩展名
+    const dot = entry.name.lastIndexOf(".");
+    el.setSelectionRange(0, dot > 0 ? dot : entry.name.length);
+  });
+}
+
+function cancelRename() {
+  renaming.value = null;
+  renameValue.value = "";
+}
+
+function joinPath(dir: string, name: string): string {
+  if (!dir || dir === "/") return `/${name}`;
+  return `${dir.replace(/\/+$/, "")}/${name}`;
+}
+
+async function commitRename(entry: RemoteFile) {
+  if (renaming.value !== entry.path) return;
+  const name = renameValue.value.trim();
+  if (!name || name === entry.name) {
+    cancelRename();
+    return;
+  }
+  cancelRename();
+  actionError.value = "";
+  try {
+    await SSH.SftpRename(props.token, entry.path, joinPath(parentOf(entry.path), name));
+    await open(cwd.value);
+  } catch (e) {
+    actionError.value = t("browser.renameFailed", { error: String(e) });
+  }
+}
+
+function askDelete() {
+  const list = selectedEntries.value;
+  closeMenu();
+  if (!list.length) return;
+  pendingDelete.value = [...list];
+}
+
+async function confirmDelete() {
+  const list = pendingDelete.value;
+  pendingDelete.value = null;
+  if (!list?.length) return;
+  actionError.value = "";
+  try {
+    for (const entry of list) await SSH.SftpRemove(props.token, entry.path, entry.isDir);
+    selected.value = new Set();
+    await open(cwd.value);
+  } catch (e) {
+    actionError.value = t("browser.deleteFailed", { error: String(e) });
+  }
+}
+
+function onMenuRefresh() {
+  closeMenu();
+  refresh();
+}
+
+function onKeyDown(ev: KeyboardEvent) {
+  if (ev.key !== "Escape") return;
+  if (menu.value) menu.value = null;
+  else if (renaming.value) cancelRename();
 }
 
 /** 拖动时携带的路径：拖的是已选条目则整组拖动，否则只拖当前条目 */
@@ -86,6 +196,9 @@ async function open(dir: string) {
   if (!props.token || !dir) return;
   busy.value = true;
   error.value = "";
+  actionError.value = "";
+  closeMenu();
+  cancelRename();
   try {
     const list = (await SSH.SftpList(props.token, dir)) ?? [];
     list.sort((a, b) => {
@@ -186,6 +299,7 @@ function onDrop() {
 }
 
 onMounted(() => {
+  window.addEventListener("keydown", onKeyDown);
   if (!props.initialDir) {
     void goHome();
     return;
@@ -198,6 +312,8 @@ onMounted(() => {
   });
 });
 
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeyDown));
+
 watch(
   () => props.token,
   () => {
@@ -206,6 +322,10 @@ watch(
     cwd.value = "";
     pathInput.value = "";
     error.value = "";
+    actionError.value = "";
+    closeMenu();
+    cancelRename();
+    pendingDelete.value = null;
     if (props.token) void goHome();
   },
 );
@@ -264,6 +384,7 @@ watch(
     <p v-else-if="error" class="err">{{ error }}</p>
 
     <div v-else class="list" @click.self="clearSelection">
+      <p v-if="actionError" class="action-err">{{ actionError }}</p>
       <div class="row head">
         <span class="c-name">{{ t("common.name") }}</span>
         <span class="c-size">{{ t("common.size") }}</span>
@@ -277,6 +398,7 @@ watch(
         :class="{ draggable: !entry.isDir, sel: selected.has(entry.path) }"
         :draggable="!entry.isDir"
         @click="onRowClick(entry, $event)"
+        @contextmenu.prevent="onRowContextMenu(entry, $event)"
         @dblclick="onRowDblClick(entry)"
         @dragstart="onDragStart(entry, $event)"
         @dragend="endSftpDrag"
@@ -292,7 +414,21 @@ watch(
             <path d="M8.6 2.6v3.2h3.2" />
           </svg>
           <span class="meta">
-            <span class="nm">{{ entry.name }}</span>
+            <input
+              v-if="renaming === entry.path"
+              :ref="setRenameInput"
+              v-model="renameValue"
+              class="rename"
+              spellcheck="false"
+              draggable="false"
+              @click.stop
+              @dblclick.stop
+              @dragstart.prevent
+              @keydown.enter.prevent="commitRename(entry)"
+              @keydown.esc.prevent="cancelRename"
+              @blur="cancelRename"
+            />
+            <span v-else class="nm">{{ entry.name }}</span>
             <span v-if="entry.mode" class="perm">{{ entry.mode }}</span>
           </span>
         </span>
@@ -304,6 +440,27 @@ watch(
       <p v-if="busy" class="empty">{{ t("browser.loading") }}</p>
     </div>
   </div>
+
+  <FileContextMenu
+    v-if="menu"
+    :x="menu.x"
+    :y="menu.y"
+    :can-rename="selectedEntries.length === 1"
+    :count="selectedEntries.length"
+    @rename="startRename"
+    @delete="askDelete"
+    @refresh="onMenuRefresh"
+    @close="closeMenu"
+  />
+
+  <ConfirmDialog
+    v-if="pendingDelete"
+    :title="t('browser.deleteTitle')"
+    :message="t('browser.deleteDesc', { n: pendingDelete.length })"
+    :confirm-text="t('common.delete')"
+    @confirm="confirmDelete"
+    @cancel="pendingDelete = null"
+  />
 </template>
 
 <style scoped>
@@ -463,6 +620,26 @@ watch(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rename {
+  width: calc(100% + 3px);
+  height: 24px;
+  margin-left: -3px;
+  padding: 0 6px;
+  border: 1px solid var(--win-accent);
+  border-radius: 6px;
+  outline: none;
+  background: var(--win-flyout);
+  color: var(--win-text);
+  font: inherit;
+  box-shadow: 0 0 0 3px var(--win-accent-soft);
+}
+.action-err {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--win-err);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .c-size,
 .c-time {
