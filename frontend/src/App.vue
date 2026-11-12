@@ -27,7 +27,6 @@ import {
   persistHosts,
   sessionLabel,
   sessions,
-  splitGroup,
   splitGroupOf,
   splitSync,
   startEventBridge,
@@ -388,14 +387,6 @@ function isPaneVisible(id: string): boolean {
   return activeTab.value?.sessions.some((s) => s.id === id) ?? false;
 }
 
-/** 拆分当前合并标签，恢复为各自独立的终端 */
-function splitActiveTab() {
-  const tab = activeTab.value;
-  if (!tab || !tab.group) return;
-  splitGroup(tab.sessions[0].id);
-  activeId.value = tab.sessions[0].id;
-}
-
 /** 递归平分布局树，得到每个终端面板的百分比区域 */
 function collectRects(node: SplitNode, rect: PaneRect, out: Map<string, PaneRect>) {
   if (node.type === "leaf") {
@@ -450,13 +441,6 @@ function paneStyle(id: string): Record<string, string> {
 
 /** 当前标签是否处于合并分屏状态 */
 const mergedLayout = computed(() => (activeTab.value?.sessions.length ?? 1) > 1);
-
-/** 工作组成员信息，用于工具栏悬浮提示 */
-const groupMembersTitle = computed(() =>
-  (activeTab.value?.sessions ?? [])
-    .map((s) => `${sessionLabel(s)} · ${s.user}@${s.host}:${s.port}`)
-    .join("\n"),
-);
 
 /** 计算能放下多少个标签，剩余部分收进「更多」按钮 */
 function updateTabsOverflow() {
@@ -1615,39 +1599,6 @@ function closeSession(id: string) {
       </section>
 
       <section v-show="page === 'term'" class="term-view">
-        <!-- 合并分屏工具栏：同步输入只影响当前合并组 -->
-        <div v-if="mergedLayout" class="term-toolbar">
-          <span class="tt-info" :title="groupMembersTitle">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <rect x="2" y="3" width="5" height="10" rx="1.2" />
-              <rect x="9" y="3" width="5" height="10" rx="1.2" />
-            </svg>
-             {{ t("tabs.group") }}
-            <span class="tt-count">{{ t("tabs.moreTitle", { n: activeTab?.sessions.length }) }}</span>
-          </span>
-          <button
-            class="tt-btn"
-            :class="{ on: splitSync }"
-            :title="splitSync ? t('tabs.syncOn') : t('tabs.syncOff')"
-            @click="splitSync = !splitSync"
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2.4 8h11.2" />
-              <path d="M5.2 5.2L2.4 8l2.8 2.8" />
-              <path d="M10.8 5.2L13.6 8l-2.8 2.8" />
-            </svg>
-            {{ t("tabs.syncInput") }}
-          </button>
-          <button class="tt-btn" :title="t('tabs.splitTip')" @click="splitActiveTab">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 2.4v11.2" />
-              <path d="M4 3l-2.4 2.4L4 7.8" />
-              <path d="M12 3l2.4 2.4L12 7.8" />
-            </svg>
-            {{ t("tabs.split") }}
-          </button>
-          <span class="tt-hint">{{ t("tabs.dragHint") }}</span>
-        </div>
         <div ref="terminalsEl" class="terminals" :class="{ merged: mergedLayout }">
           <!-- 落点预览：只覆盖目标面板将要分出去的那一半 -->
           <div v-if="splitPreview" class="split-preview" :style="previewStyle">
@@ -1664,8 +1615,10 @@ function closeSession(id: string) {
               :session="s"
               :visible="page === 'term' && isPaneVisible(s.id)"
               :merged="mergedLayout"
+              :sync="splitSync"
               @activate="activeId = $event"
               @close="closeSession(s.id)"
+              @toggle-sync="splitSync = !splitSync"
               @pane-drag-start="onPanePointerDown"
             />
           </div>
@@ -3251,73 +3204,5 @@ function closeSession(id: string) {
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
-}
-/* 合并分屏顶部工具栏 */
-.term-toolbar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--win-stroke);
-  background: var(--win-chrome);
-  color: var(--win-text-2);
-  font-size: 12px;
-}
-.term-toolbar .tt-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--win-text);
-  font-weight: 600;
-}
-/* 工作组成员数量角标 */
-.term-toolbar .tt-count {
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--win-fill);
-  color: var(--win-text-3);
-  font-size: 11px;
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-/* 工具栏右侧操作提示 */
-.term-toolbar .tt-hint {
-  margin-left: auto;
-  color: var(--win-text-3);
-  font-size: 11.5px;
-}
-.term-toolbar svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.term-toolbar .tt-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid var(--win-stroke);
-  border-radius: 7px;
-  background: var(--win-fill);
-  color: var(--win-text-2);
-  font-size: 12px;
-  cursor: default;
-}
-.term-toolbar .tt-btn:hover {
-  background: var(--win-fill-hover);
-  border-color: var(--win-stroke-strong);
-  color: var(--win-text);
-}
-.term-toolbar .tt-btn.on {
-  background: var(--win-accent-soft);
-  border-color: var(--win-accent);
-  color: var(--win-accent);
 }
 </style>

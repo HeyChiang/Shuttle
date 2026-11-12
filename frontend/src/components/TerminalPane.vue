@@ -25,11 +25,14 @@ const props = defineProps<{
   visible: boolean;
   /** 是否处于合并分屏：显示终端标题栏，可拖回顶部标签栏脱组 */
   merged?: boolean;
+  /** 工作组的同步输入是否开启 */
+  sync?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "activate", id: string): void;
   (e: "close"): void;
+  (e: "toggle-sync"): void;
   (e: "pane-drag-start", id: string, ev: PointerEvent): void;
 }>();
 
@@ -146,7 +149,7 @@ function activate() {
 function onHeadPointerDown(e: PointerEvent) {
   if (!props.merged) return;
   if (e.button !== 0) return;
-  if ((e.target as HTMLElement).closest(".pane-close")) return;
+  if ((e.target as HTMLElement).closest(".pane-close, .pane-sync")) return;
   emit("pane-drag-start", props.session.id, e);
 }
 
@@ -315,6 +318,20 @@ function focus() {
       <span class="pane-name">{{ session.name }}</span>
       <span class="pane-host">{{ session.user }}@{{ session.host }}:{{ session.port }}</span>
       <button
+        class="pane-sync"
+        :class="{ on: sync }"
+        :title="sync ? t('tabs.syncOn') : t('tabs.syncOff')"
+        draggable="false"
+        @mousedown.stop
+        @click.stop="emit('toggle-sync')"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2.4 8h11.2" />
+          <path d="M5.2 5.2L2.4 8l2.8 2.8" />
+          <path d="M10.8 5.2L13.6 8l-2.8 2.8" />
+        </svg>
+      </button>
+      <button
         class="pane-close"
         :title="t('session.closePane')"
         draggable="false"
@@ -401,10 +418,50 @@ function focus() {
   font-family: var(--win-mono);
   font-size: 11px;
 }
+/* 同步输入按钮：位于关闭按钮左侧，鼠标进入当前终端区域后显示 */
+.pane-sync {
+  flex: none;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--win-text-3);
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.pane:hover .pane-sync {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pane-sync svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pane-sync:hover {
+  background: var(--win-fill-press);
+  color: var(--win-text);
+}
+.pane-sync.on {
+  background: var(--win-accent-soft);
+  color: var(--win-accent);
+}
 /* 鼠标进入终端区域后显示右上角关闭按钮 */
 .pane-close {
   flex: none;
-  margin-left: auto;
   display: grid;
   place-items: center;
   width: 20px;
